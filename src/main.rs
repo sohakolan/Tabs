@@ -106,8 +106,12 @@ fn main() {
     // Délégué de l'application : un clic sur l'icône du Dock rouvre les
     // préférences.
     app.setDelegate(Some(ProtocolObject::from_ref(&*controller)));
-    // Ouvre les préférences au lancement.
-    controller.show_preferences();
+    // Ouvre les préférences au lancement manuel, mais pas lors d'un démarrage
+    // automatique à l'ouverture de session (le LaunchAgent passe « --login »).
+    let launched_at_login = std::env::args().any(|a| a == "--login");
+    if !launched_at_login {
+        controller.show_preferences();
+    }
 
     // Garde le contrôleur en vie pendant toute la durée de la boucle.
     let _controller = controller;

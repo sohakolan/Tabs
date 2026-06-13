@@ -44,6 +44,7 @@ fn plist_contents(program: &str) -> String {
 	<key>ProgramArguments</key>
 	<array>
 		<string>{program}</string>
+		<string>--login</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
