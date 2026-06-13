@@ -49,6 +49,9 @@ struct TapState {
     windows: Vec<Window>,
     /// Mode d'affichage courant des cellules.
     mode: DisplayMode,
+    /// Modificateur qui déclenche/maintient le cycle (Option par défaut, ou
+    /// Command si le remplacement de Cmd-Tab est activé).
+    trigger_flag: CGEventFlags,
     /// L'overlay affiché à l'écran (créé à l'installation, sur le thread
     /// principal).
     overlay: Option<Overlay>,
@@ -63,6 +66,7 @@ thread_local! {
         switcher: Switcher::new(),
         windows: Vec::new(),
         mode: DisplayMode::Thumbnails,
+        trigger_flag: CGEventFlags::MaskAlternate,
         overlay: None,
         on_open_prefs: Box::new(|| {}),
         port: None,
@@ -153,13 +157,14 @@ unsafe extern "C-unwind" fn tap_callback(
     }
 
     let flags = CGEvent::flags(Some(ev));
-    let option_held = flags.contains(CGEventFlags::MaskAlternate);
+    let trigger_flag = STATE.with(|s| s.borrow().trigger_flag);
+    let trigger_held = flags.contains(trigger_flag);
     let shift_held = flags.contains(CGEventFlags::MaskShift);
 
     match event_type {
         CGEventType::KeyDown => {
             let keycode = keycode(ev);
-            if keycode == KEYCODE_TAB && option_held {
+            if keycode == KEYCODE_TAB && trigger_held {
                 on_tab(shift_held);
                 return swallow;
             }
@@ -197,7 +202,8 @@ unsafe extern "C-unwind" fn tap_callback(
             passthrough
         }
         CGEventType::FlagsChanged => {
-            if is_active() && !option_held {
+            // Le relâchement du modificateur de déclenchement valide la sélection.
+            if is_active() && !trigger_held {
                 dispatch(Input::OptionReleased);
             }
             passthrough
@@ -234,11 +240,26 @@ fn dispatch(input: Input) {
     perform(action);
 }
 
-/// Quitte l'application (touche `q` pendant l'overlay).
+/// Quitte l'application (touche `q` pendant l'overlay), en restaurant d'abord
+/// le commutateur natif de macOS.
 fn quit() {
+    crate::system::set_native_cmd_tab_enabled(true);
     if let Some(mtm) = MainThreadMarker::new() {
         NSApplication::sharedApplication(mtm).terminate(None);
     }
+}
+
+/// Active/désactive le remplacement du Cmd-Tab système : bascule le modificateur
+/// de déclenchement (Command vs Option) et (dés)active le commutateur natif.
+pub fn set_replace_cmd_tab(on: bool) {
+    STATE.with(|s| {
+        s.borrow_mut().trigger_flag = if on {
+            CGEventFlags::MaskCommand
+        } else {
+            CGEventFlags::MaskAlternate
+        };
+    });
+    crate::system::set_native_cmd_tab_enabled(!on);
 }
 
 /// Ouvre les préférences (touche `,`) : ferme d'abord l'overlay.

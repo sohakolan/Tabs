@@ -22,6 +22,9 @@ pub struct Settings {
     pub show_in_dock: bool,
     /// Afficher l'icône de l'application dans la barre des menus.
     pub show_in_menu_bar: bool,
+    /// Remplacer le Cmd-Tab natif de macOS par Tabs (déclencheur = Cmd-Tab et
+    /// désactivation du commutateur système).
+    pub replace_cmd_tab: bool,
 }
 
 impl Default for Settings {
@@ -31,6 +34,7 @@ impl Default for Settings {
             mode: DisplayMode::Thumbnails,
             show_in_dock: false,
             show_in_menu_bar: false,
+            replace_cmd_tab: false,
         }
     }
 }

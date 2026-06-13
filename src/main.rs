@@ -13,6 +13,7 @@ mod app_ui;
 mod config;
 mod hotkey;
 mod permissions;
+mod system;
 mod ui;
 mod windows;
 
@@ -92,6 +93,8 @@ fn main() {
         settings.mode,
         Box::new(move || prefs_controller.show_preferences()),
     );
+    // Applique le remplacement éventuel du Cmd-Tab système.
+    hotkey::set_replace_cmd_tab(settings.replace_cmd_tab);
 
     // Garde le contrôleur en vie pendant toute la durée de la boucle.
     let _controller = controller;

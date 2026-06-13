@@ -42,6 +42,8 @@ define_class!(
 
         #[unsafe(method(quitApp:))]
         fn action_quit(&self, _sender: Option<&AnyObject>) {
+            // Restaure le commutateur natif avant de quitter.
+            crate::system::set_native_cmd_tab_enabled(true);
             NSApplication::sharedApplication(self.ivars().mtm).terminate(None);
         }
 
@@ -73,6 +75,14 @@ define_class!(
             self.ivars().settings.borrow_mut().show_in_menu_bar = on;
             self.save();
             self.apply_menu_bar_visibility();
+        }
+
+        #[unsafe(method(toggleReplaceCmdTab:))]
+        fn action_toggle_replace_cmd_tab(&self, sender: Option<&AnyObject>) {
+            let on = checkbox_is_on(sender);
+            self.ivars().settings.borrow_mut().replace_cmd_tab = on;
+            self.save();
+            hotkey::set_replace_cmd_tab(on);
         }
 
         #[unsafe(method(grantAccessibility:))]
@@ -171,7 +181,7 @@ impl AppController {
         let settings = self.ivars().settings.borrow().clone();
 
         let width = 360.0;
-        let height = 280.0;
+        let height = 320.0;
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
                 NSWindow::alloc(mtm),
@@ -215,6 +225,12 @@ impl AppController {
             self, settings.show_in_menu_bar,
             NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 22.0)));
         content.addSubview(&menubar);
+
+        y -= 32.0;
+        let cmd_tab = make_checkbox(mtm, "Remplacer le Cmd-Tab du système",
+            sel!(toggleReplaceCmdTab:), self, settings.replace_cmd_tab,
+            NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 22.0)));
+        content.addSubview(&cmd_tab);
 
         y -= 48.0;
         let ax = make_button(mtm, "Autoriser l'Accessibilité", sel!(grantAccessibility:), self,

@@ -42,7 +42,7 @@ ScreenCaptureKit.
 | **M5** | Miniatures de fenêtres (`CGWindowListCreateImage`, repli icône) | ✅ |
 | **Modes** | Affichage commutable Thumbnails/AppIcons/Titles (touche `m`) · **souris** (survol/clic) | ✅ |
 | **Réglages** | `q` quitte · `,` ouvre les préférences (mode, visibilité, permissions) · visibilité Dock + barre des menus **off par défaut** · réglages persistés | ✅ |
-| Suivant | Remplacement du Cmd-Tab de macOS | ⏳ |
+| **Cmd-Tab** | Option de remplacement du Cmd-Tab natif (désactive le commutateur système, déclencheur = Cmd-Tab) | ✅ |
 | Post-MVP | Migration ScreenCaptureKit · Spaces · multi-écran · recherche · actions traffic-light · gestes · focus renforcé (SLPS) · a11y · i18n | — |
 
 ## Build & lancement
