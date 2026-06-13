@@ -13,6 +13,10 @@ pub enum Input {
     OptionReleased,
     /// Échap pressé → annulation.
     Escape,
+    /// Sélection directe d'un index (survol souris).
+    Point { index: usize },
+    /// Validation directe d'un index (clic souris).
+    Click { index: usize },
 }
 
 /// Actions que la machine demande à l'hôte d'exécuter.
@@ -71,7 +75,28 @@ impl Switcher {
             Input::Tab { shift } => self.on_tab(shift),
             Input::OptionReleased => self.on_release(),
             Input::Escape => self.on_escape(),
+            Input::Point { index } => self.point_to(index),
+            Input::Click { index } => self.click_at(index),
         }
+    }
+
+    /// Sélection directe (survol souris) : ne fait rien si inactif ou hors borne.
+    fn point_to(&mut self, index: usize) -> Action {
+        if !self.active || index >= self.count {
+            return Action::None;
+        }
+        self.selected = index;
+        Action::Select { selected: index }
+    }
+
+    /// Validation directe (clic souris).
+    fn click_at(&mut self, index: usize) -> Action {
+        if !self.active || index >= self.count {
+            return Action::None;
+        }
+        self.selected = index;
+        self.active = false;
+        Action::Commit { selected: index }
     }
 
     fn on_tab(&mut self, shift: bool) -> Action {
@@ -212,6 +237,29 @@ mod tests {
         let mut s = switcher(3);
         assert_eq!(s.on_input(Input::OptionReleased), Action::None);
         assert_eq!(s.on_input(Input::Escape), Action::None);
+    }
+
+    #[test]
+    fn survol_deplace_la_selection_si_actif() {
+        let mut s = switcher(4);
+        assert_eq!(s.on_input(Input::Point { index: 2 }), Action::None); // inactif
+        s.on_input(Input::Tab { shift: false }); // actif
+        assert_eq!(
+            s.on_input(Input::Point { index: 3 }),
+            Action::Select { selected: 3 }
+        );
+        assert_eq!(s.on_input(Input::Point { index: 9 }), Action::None); // hors borne
+    }
+
+    #[test]
+    fn clic_valide_et_desactive() {
+        let mut s = switcher(4);
+        s.on_input(Input::Tab { shift: false });
+        assert_eq!(
+            s.on_input(Input::Click { index: 2 }),
+            Action::Commit { selected: 2 }
+        );
+        assert!(!s.is_active());
     }
 
     #[test]

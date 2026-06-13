@@ -8,21 +8,139 @@
 //! Les vues sont reconstruites à chaque ouverture (`show`) ; pendant le cycle,
 //! `select` se contente de déplacer la surbrillance.
 
+use core::cell::{Cell, RefCell};
+
 use objc2::rc::Retained;
-use objc2::{msg_send, AllocAnyThread, MainThreadOnly};
+use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSBox, NSBoxType, NSColor, NSFont, NSImage, NSImageScaling, NSImageView,
-    NSPanel, NSPopUpMenuWindowLevel, NSRunningApplication, NSScreen, NSTextAlignment, NSTextField,
-    NSTitlePosition, NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSBackingStoreType, NSBox, NSBoxType, NSColor, NSEvent, NSFont, NSImage, NSImageScaling,
+    NSImageView, NSPanel, NSPopUpMenuWindowLevel, NSRunningApplication, NSScreen, NSTextAlignment,
+    NSTextField, NSTitlePosition, NSTrackingArea, NSTrackingAreaOptions, NSView,
+    NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString};
 
 use super::layout::{self, DisplayMode, Rect};
 use crate::windows::{self, Window};
 
+/// Données portées par la vue de contenu de l'overlay.
+struct OverlayViewIvars {
+    /// Rectangles cliquables/survolables par index (coordonnées de la vue).
+    cells: RefCell<Vec<NSRect>>,
+    /// Dernier index survolé (-1 = aucun), pour ne notifier qu'aux changements.
+    last_hover: Cell<isize>,
+    /// Rappel au survol d'une cellule (index).
+    on_hover: Box<dyn Fn(usize)>,
+    /// Rappel au clic sur une cellule (index).
+    on_click: Box<dyn Fn(usize)>,
+}
+
+define_class!(
+    // SAFETY:
+    // - NSView n'impose pas de contrainte de sous-classe particulière.
+    // - OverlayView n'implémente pas Drop.
+    #[unsafe(super = NSView)]
+    #[thread_kind = MainThreadOnly]
+    #[ivars = OverlayViewIvars]
+    struct OverlayView;
+
+    impl OverlayView {
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, event: &NSEvent) {
+            self.handle_hover(event);
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            self.handle_hover(event);
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            if let Some(i) = self.cell_at(event) {
+                (self.ivars().on_click)(i);
+            }
+        }
+
+        // Permet de recevoir le premier clic même si le panneau n'est pas actif.
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+    }
+);
+
+impl OverlayView {
+    fn new(
+        mtm: MainThreadMarker,
+        on_hover: Box<dyn Fn(usize)>,
+        on_click: Box<dyn Fn(usize)>,
+    ) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(OverlayViewIvars {
+            cells: RefCell::new(Vec::new()),
+            last_hover: Cell::new(-1),
+            on_hover,
+            on_click,
+        });
+        // SAFETY: init de NSView/NSObject.
+        let this: Retained<Self> = unsafe { msg_send![super(this), init] };
+
+        // Zone de suivi de la souris couvrant toute la vue visible.
+        let area = unsafe {
+            NSTrackingArea::initWithRect_options_owner_userInfo(
+                NSTrackingArea::alloc(),
+                NSRect::ZERO,
+                NSTrackingAreaOptions::MouseMoved
+                    | NSTrackingAreaOptions::ActiveAlways
+                    | NSTrackingAreaOptions::InVisibleRect,
+                Some(&this),
+                None,
+            )
+        };
+        this.addTrackingArea(&area);
+        this
+    }
+
+    /// Met à jour les zones cliquables (appelé à chaque ouverture).
+    fn set_cells(&self, rects: Vec<NSRect>) {
+        *self.ivars().cells.borrow_mut() = rects;
+        self.ivars().last_hover.set(-1);
+    }
+
+    /// Index de la cellule sous le curseur pour un évènement, le cas échéant.
+    fn cell_at(&self, event: &NSEvent) -> Option<usize> {
+        let window_point = event.locationInWindow();
+        let p = self.convertPoint_fromView(window_point, None);
+        self.ivars()
+            .cells
+            .borrow()
+            .iter()
+            .position(|r| point_in(*r, p))
+    }
+
+    /// Notifie le survol si la cellule sous le curseur a changé.
+    fn handle_hover(&self, event: &NSEvent) {
+        if let Some(i) = self.cell_at(event) {
+            if self.ivars().last_hover.get() != i as isize {
+                self.ivars().last_hover.set(i as isize);
+                (self.ivars().on_hover)(i);
+            }
+        }
+    }
+}
+
+fn point_in(r: NSRect, p: NSPoint) -> bool {
+    p.x >= r.origin.x
+        && p.x < r.origin.x + r.size.width
+        && p.y >= r.origin.y
+        && p.y < r.origin.y + r.size.height
+}
+
 pub struct Overlay {
     mtm: MainThreadMarker,
     panel: Retained<NSPanel>,
+    /// Vue de contenu personnalisée (reçoit les évènements souris).
+    view: Retained<OverlayView>,
     /// Boîte de surbrillance, recréée à chaque `show`.
     selection: Option<Retained<NSBox>>,
     /// Rectangles de surbrillance par index, pour `select`.
@@ -30,8 +148,13 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    /// Crée et configure le panneau (sans l'afficher).
-    pub fn new(mtm: MainThreadMarker) -> Self {
+    /// Crée et configure le panneau (sans l'afficher). `on_hover`/`on_click`
+    /// sont appelés (avec l'index de cellule) au survol et au clic souris.
+    pub fn new(
+        mtm: MainThreadMarker,
+        on_hover: Box<dyn Fn(usize)>,
+        on_click: Box<dyn Fn(usize)>,
+    ) -> Self {
         let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
             NSPanel::alloc(mtm),
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(200.0, 120.0)),
@@ -56,10 +179,17 @@ impl Overlay {
                 | NSWindowCollectionBehavior::Stationary
                 | NSWindowCollectionBehavior::FullScreenAuxiliary,
         );
+        // Nécessaire pour recevoir les évènements `mouseMoved`.
+        panel.setAcceptsMouseMovedEvents(true);
+
+        // Vue de contenu personnalisée qui capte la souris.
+        let view = OverlayView::new(mtm, on_hover, on_click);
+        panel.setContentView(Some(&view));
 
         Self {
             mtm,
             panel,
+            view,
             selection: None,
             sel_frames: Vec::new(),
         }
@@ -81,7 +211,11 @@ impl Overlay {
             self.panel.setFrameOrigin(NSPoint::new(x, y));
         }
 
-        let content = self.panel.contentView().expect("le panneau a une vue");
+        let content = self.view.clone();
+
+        // Renseigne les zones cliquables/survolables pour la souris.
+        self.view
+            .set_cells(lay.cells.iter().map(|c| to_nsrect(c.hit)).collect());
 
         // Repart d'une vue vide.
         content.setSubviews(&NSArray::new());

@@ -65,9 +65,10 @@ thread_local! {
 /// principal, avant `NSApplication::run`). Retourne `false` en cas d'échec
 /// (typiquement permission d'Accessibilité manquante).
 pub fn install() -> bool {
-    // L'overlay vit sur le thread principal (objets AppKit non-Send).
+    // L'overlay vit sur le thread principal (objets AppKit non-Send). On lui
+    // confie les rappels souris, branchés sur la même machine à états.
     let mtm = MainThreadMarker::new().expect("install doit s'exécuter sur le thread principal");
-    let overlay = Overlay::new(mtm);
+    let overlay = Overlay::new(mtm, Box::new(mouse_hover), Box::new(mouse_click));
     STATE.with(|s| s.borrow_mut().overlay = Some(overlay));
 
     // SAFETY: signature conforme à CGEventTapCallBack ; `user_info` non utilisé
@@ -206,6 +207,16 @@ fn on_tab(shift: bool) {
 fn dispatch(input: Input) {
     let action = STATE.with(|s| s.borrow_mut().switcher.on_input(input));
     perform(action);
+}
+
+/// Survol souris d'une cellule : déplace la sélection.
+fn mouse_hover(index: usize) {
+    dispatch(Input::Point { index });
+}
+
+/// Clic souris sur une cellule : valide la sélection (active la fenêtre).
+fn mouse_click(index: usize) {
+    dispatch(Input::Click { index });
 }
 
 /// Passe au mode d'affichage suivant et redessine l'overlay (sans changer la

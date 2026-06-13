@@ -46,7 +46,7 @@ fn main() {
     // Mode diagnostic : `tabs --demo` affiche l'overlay (sans installer le tap)
     // pour inspecter le rendu, puis laisse la boucle tourner.
     if demo {
-        let mut overlay = ui::Overlay::new(mtm);
+        let mut overlay = ui::Overlay::new(mtm, Box::new(|_| {}), Box::new(|_| {}));
         let wins = windows::list_windows();
         let selected = if wins.len() > 1 { 1 } else { 0 };
         println!("[Tabs] --demo : {} fenêtre(s), sélection {selected}", wins.len());
