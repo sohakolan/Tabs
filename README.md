@@ -37,7 +37,7 @@ ScreenCaptureKit.
 | **M0** | Scaffolding : app agent (`NSApplication` `.accessory`), permission Accessibilité, bundle `.app` | ✅ |
 | **M1** | Déclencheur Option-Tab (`CGEventTap`, cycle, commit au relâchement, annulation Échap) | ✅ |
 | **M2** | Énumération des fenêtres visibles (`CGWindowList`, ordre z) | ✅ |
-| **M3** | Overlay : `NSPanel` non-activant, grille icône+titre, navigation clavier | ⏳ |
+| **M3** | Overlay : `NSPanel` non-activant, rangée icône+titre, surbrillance/navigation clavier | ✅ |
 | **M4** | Activation de la fenêtre sélectionnée → **MVP utilisable** | ⏳ |
 | **M5** | Miniatures live (ScreenCaptureKit, IOSurface) | ⏳ |
 | Post-MVP | Spaces, multi-écran, recherche, styles, actions traffic-light, gestes, préférences, a11y, i18n | — |

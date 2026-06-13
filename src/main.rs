@@ -11,6 +11,7 @@
 
 mod hotkey;
 mod permissions;
+mod ui;
 mod windows;
 
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
@@ -34,11 +35,27 @@ fn main() {
         return;
     }
 
+    let demo = std::env::args().any(|a| a == "--demo");
+
     let mtm = MainThreadMarker::new().expect("Tabs doit être lancé depuis le thread principal");
 
     let app = NSApplication::sharedApplication(mtm);
     // Application « agent » : ni icône dans le Dock, ni menu — juste l'overlay.
     app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+    // Mode diagnostic : `tabs --demo` affiche l'overlay (sans installer le tap)
+    // pour inspecter le rendu, puis laisse la boucle tourner.
+    if demo {
+        let mut overlay = ui::Overlay::new(mtm);
+        let wins = windows::list_windows();
+        let selected = if wins.len() > 1 { 1 } else { 0 };
+        println!("[Tabs] --demo : {} fenêtre(s), sélection {selected}", wins.len());
+        overlay.show(&wins, selected);
+        // L'overlay doit rester en vie pendant la boucle d'évènements.
+        std::mem::forget(overlay);
+        app.run();
+        return;
+    }
 
     if permissions::ensure_accessibility() {
         println!("[Tabs] Permission d'Accessibilité accordée.");

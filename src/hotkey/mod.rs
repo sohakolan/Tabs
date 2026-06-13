@@ -12,6 +12,7 @@ mod state;
 
 pub use state::{Action, Input, Switcher};
 
+use crate::ui::Overlay;
 use crate::windows::{self, Window};
 
 use core::ffi::c_void;
@@ -19,6 +20,7 @@ use core::ptr::{self, NonNull};
 use std::cell::RefCell;
 
 use objc2_core_foundation::{kCFRunLoopCommonModes, CFMachPort, CFRetained, CFRunLoop};
+use objc2_foundation::MainThreadMarker;
 use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
     CGEventTapProxy, CGEventType,
@@ -38,6 +40,9 @@ struct TapState {
     /// Instantané des fenêtres pris à l'ouverture du sélecteur ; l'index
     /// sélectionné par la [`Switcher`] désigne une entrée de ce vecteur.
     windows: Vec<Window>,
+    /// L'overlay affiché à l'écran (créé à l'installation, sur le thread
+    /// principal).
+    overlay: Option<Overlay>,
     /// Conservé pour pouvoir réactiver le tap s'il est désactivé par le système.
     port: Option<CFRetained<CFMachPort>>,
 }
@@ -46,6 +51,7 @@ thread_local! {
     static STATE: RefCell<TapState> = RefCell::new(TapState {
         switcher: Switcher::new(),
         windows: Vec::new(),
+        overlay: None,
         port: None,
     });
 }
@@ -54,6 +60,11 @@ thread_local! {
 /// principal, avant `NSApplication::run`). Retourne `false` en cas d'échec
 /// (typiquement permission d'Accessibilité manquante).
 pub fn install() -> bool {
+    // L'overlay vit sur le thread principal (objets AppKit non-Send).
+    let mtm = MainThreadMarker::new().expect("install doit s'exécuter sur le thread principal");
+    let overlay = Overlay::new(mtm);
+    STATE.with(|s| s.borrow_mut().overlay = Some(overlay));
+
     // SAFETY: signature conforme à CGEventTapCallBack ; `user_info` non utilisé
     // (l'état est dans un thread_local). `CGEventTapCreate` est déprécié au
     // profit d'une méthode non encore exposée par objc2 : on l'utilise donc tel
@@ -186,38 +197,28 @@ fn dispatch(input: Input) {
     perform(action);
 }
 
-/// Exécute l'action décidée par la machine à états.
+/// Exécute l'action décidée par la machine à états en pilotant l'overlay.
 ///
-/// M2 trace la fenêtre réelle visée ; M3 (overlay) et M4 (activation) y
-/// brancheront l'UI et le focus.
+/// M3 affiche/masque l'overlay et déplace la surbrillance ; M4 ajoutera
+/// l'activation réelle de la fenêtre validée.
 fn perform(action: Action) {
-    match action {
-        Action::Show { selected } => {
-            println!("[Tabs] ▸ ouverture du sélecteur — {}", describe(selected))
-        }
-        Action::Select { selected } => println!("[Tabs]   sélection → {}", describe(selected)),
-        Action::Commit { selected } => {
-            println!("[Tabs] ✓ activation de {}", describe(selected))
-        }
-        Action::Cancel => println!("[Tabs] ✕ annulé"),
-        Action::None => {}
-    }
-}
-
-/// Décrit la fenêtre à l'index donné dans l'instantané courant.
-fn describe(index: usize) -> String {
     STATE.with(|s| {
-        let st = s.borrow();
-        match st.windows.get(index) {
-            Some(w) => {
-                let title = if w.title.is_empty() {
-                    "(titre indisponible)"
-                } else {
-                    w.title.as_str()
-                };
-                format!("{} — {} [id {}]", w.app_name, title, w.id)
+        let mut st = s.borrow_mut();
+        let st = &mut *st;
+        let Some(overlay) = st.overlay.as_mut() else {
+            return;
+        };
+        match action {
+            Action::Show { selected } => overlay.show(&st.windows, selected),
+            Action::Select { selected } => overlay.select(selected),
+            Action::Commit { selected } => {
+                overlay.hide();
+                if let Some(w) = st.windows.get(selected) {
+                    println!("[Tabs] ✓ {} [id {}] (activation en M4)", w.app_name, w.id);
+                }
             }
-            None => format!("fenêtre #{index}"),
+            Action::Cancel => overlay.hide(),
+            Action::None => {}
         }
-    })
+    });
 }
