@@ -20,6 +20,7 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 use std::cell::RefCell;
 
+use objc2_app_kit::NSEvent;
 use objc2_core_foundation::{kCFRunLoopCommonModes, CFMachPort, CFRetained, CFRunLoop};
 use objc2_foundation::MainThreadMarker;
 use objc2_core_graphics::{
@@ -27,16 +28,14 @@ use objc2_core_graphics::{
     CGEventTapProxy, CGEventType,
 };
 
+// Tab et Échap se repèrent par leur keycode physique (identique sur tous les
+// agencements de clavier). En revanche les lettres (q, m) et la virgule
+// dépendent de l'agencement (AZERTY ≠ QWERTY) : on les repère par le caractère
+// réellement tapé, pas par la position physique de la touche.
 /// Code de touche virtuelle macOS pour Tab.
 const KEYCODE_TAB: i64 = 0x30;
 /// Code de touche virtuelle macOS pour Échap.
 const KEYCODE_ESCAPE: i64 = 0x35;
-/// Code de touche virtuelle macOS pour « m » (cycle le mode d'affichage).
-const KEYCODE_M: i64 = 0x2E;
-/// Code de touche virtuelle macOS pour « q » (quitte l'application).
-const KEYCODE_Q: i64 = 0x0C;
-/// Code de touche virtuelle macOS pour « , » (ouvre les préférences).
-const KEYCODE_COMMA: i64 = 0x2B;
 
 /// Masque des évènements écoutés : keyDown (10) | keyUp (11) | flagsChanged (12).
 const EVENT_MASK: u64 = (1 << 10) | (1 << 11) | (1 << 12);
@@ -172,17 +171,23 @@ unsafe extern "C-unwind" fn tap_callback(
                 dispatch(Input::Escape);
                 return swallow;
             }
-            if keycode == KEYCODE_M && is_active() {
-                cycle_mode();
-                return swallow;
-            }
-            if keycode == KEYCODE_Q && is_active() {
-                quit_selected_app();
-                return swallow;
-            }
-            if keycode == KEYCODE_COMMA && is_active() {
-                open_prefs();
-                return swallow;
+            // Lettres/virgule : repérées par caractère (agencement clavier).
+            if is_active() {
+                match typed_char(ev) {
+                    Some('m') => {
+                        cycle_mode();
+                        return swallow;
+                    }
+                    Some('q') => {
+                        quit_selected_app();
+                        return swallow;
+                    }
+                    Some(',') => {
+                        open_prefs();
+                        return swallow;
+                    }
+                    _ => {}
+                }
             }
             passthrough
         }
@@ -193,9 +198,7 @@ unsafe extern "C-unwind" fn tap_callback(
             if is_active()
                 && (keycode == KEYCODE_TAB
                     || keycode == KEYCODE_ESCAPE
-                    || keycode == KEYCODE_M
-                    || keycode == KEYCODE_Q
-                    || keycode == KEYCODE_COMMA)
+                    || matches!(typed_char(ev), Some('m') | Some('q') | Some(',')))
             {
                 return swallow;
             }
@@ -214,6 +217,14 @@ unsafe extern "C-unwind" fn tap_callback(
 
 fn keycode(ev: &CGEvent) -> i64 {
     CGEvent::integer_value_field(Some(ev), CGEventField::KeyboardEventKeycode)
+}
+
+/// Caractère tapé (sans modificateurs), en minuscule. Permet de repérer les
+/// raccourcis lettres/virgule indépendamment de l'agencement (AZERTY, QWERTY…).
+fn typed_char(ev: &CGEvent) -> Option<char> {
+    let event = NSEvent::eventWithCGEvent(ev)?;
+    let string = event.charactersIgnoringModifiers()?;
+    string.to_string().chars().next().map(|c| c.to_ascii_lowercase())
 }
 
 fn is_active() -> bool {
