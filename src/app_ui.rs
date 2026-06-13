@@ -11,19 +11,19 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSBox, NSBoxType, NSButton,
-    NSCellImagePosition, NSColor, NSControlStateValueOn, NSFont, NSImage, NSImageScaling,
-    NSImageView, NSMenu, NSMenuItem, NSPopUpButton, NSStatusBar, NSStatusItem, NSTextField,
-    NSTitlePosition, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSBox,
+    NSBoxType, NSButton, NSCellImagePosition, NSColor, NSControlStateValueOn, NSFont, NSImage,
+    NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSPopUpButton, NSStatusBar, NSStatusItem,
+    NSTextField, NSTitlePosition, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{MainThreadMarker, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use crate::config::{self, Settings, TriggerModifier};
 use crate::ui::DisplayMode;
 use crate::{hotkey, permissions};
 
 const WIN_W: f64 = 460.0;
-const WIN_H: f64 = 660.0;
+const WIN_H: f64 = 700.0;
 
 pub(crate) struct Ivars {
     mtm: MainThreadMarker,
@@ -109,6 +109,14 @@ define_class!(
             self.apply_menu_bar_visibility();
         }
 
+        #[unsafe(method(toggleLaunchAtLogin:))]
+        fn action_toggle_launch_at_login(&self, sender: Option<&AnyObject>) {
+            let on = checkbox_is_on(sender);
+            self.ivars().settings.borrow_mut().launch_at_login = on;
+            self.save();
+            crate::login::set_launch_at_login(on);
+        }
+
         #[unsafe(method(grantAccessibility:))]
         fn action_grant_accessibility(&self, _sender: Option<&AnyObject>) {
             permissions::ensure_accessibility();
@@ -117,6 +125,23 @@ define_class!(
         #[unsafe(method(grantScreenRecording:))]
         fn action_grant_screen_recording(&self, _sender: Option<&AnyObject>) {
             permissions::ensure_screen_recording();
+        }
+    }
+
+    // SAFETY: NSObjectProtocol n'a pas d'exigence de sûreté.
+    unsafe impl NSObjectProtocol for AppController {}
+
+    // SAFETY: NSApplicationDelegate n'a pas de méthode requise.
+    unsafe impl NSApplicationDelegate for AppController {
+        // Clic sur l'icône du Dock (sans fenêtre visible) → rouvre les préférences.
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn application_should_handle_reopen(
+            &self,
+            _app: &NSApplication,
+            _has_visible_windows: bool,
+        ) -> bool {
+            self.show_preferences();
+            true
         }
     }
 );
@@ -319,6 +344,15 @@ impl AppController {
             sel!(toggleMenuBar:),
             self,
             settings.show_in_menu_bar,
+            rect(24.0, y, 410.0, 22.0),
+        ));
+        y -= 30.0;
+        content.addSubview(&checkbox(
+            mtm,
+            "Lancer au démarrage",
+            sel!(toggleLaunchAtLogin:),
+            self,
+            settings.launch_at_login,
             rect(24.0, y, 410.0, 22.0),
         ));
 

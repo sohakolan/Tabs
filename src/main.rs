@@ -12,11 +12,13 @@
 mod app_ui;
 mod config;
 mod hotkey;
+mod login;
 mod permissions;
 mod system;
 mod ui;
 mod windows;
 
+use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::MainThreadMarker;
 
@@ -90,17 +92,22 @@ fn main() {
         settings.mode,
         Box::new(move || prefs_controller.show_preferences()),
     );
-    // Applique le modificateur de déclenchement et l'état du Cmd-Tab système.
+    // Applique le modificateur de déclenchement, l'état du Cmd-Tab système et le
+    // lancement au démarrage.
     hotkey::set_trigger_modifier(settings.trigger);
     hotkey::set_disable_native_cmd_tab(settings.disable_native_cmd_tab);
+    login::set_launch_at_login(settings.launch_at_login);
 
-    // Au tout premier lancement, l'app est invisible : on ouvre les préférences
-    // pour que l'utilisateur sache qu'elle tourne et puisse la configurer. On
-    // matérialise le fichier de réglages pour ne le faire qu'une fois.
+    // Matérialise le fichier de réglages au premier lancement.
     if first_run {
         config::save(&settings);
-        controller.show_preferences();
     }
+
+    // Délégué de l'application : un clic sur l'icône du Dock rouvre les
+    // préférences.
+    app.setDelegate(Some(ProtocolObject::from_ref(&*controller)));
+    // Ouvre les préférences au lancement.
+    controller.show_preferences();
 
     // Garde le contrôleur en vie pendant toute la durée de la boucle.
     let _controller = controller;

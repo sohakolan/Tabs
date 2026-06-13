@@ -40,6 +40,8 @@ pub struct Settings {
     pub show_in_dock: bool,
     /// Afficher l'icône de l'application dans la barre des menus.
     pub show_in_menu_bar: bool,
+    /// Lancer Tabs automatiquement à l'ouverture de session.
+    pub launch_at_login: bool,
 }
 
 impl Default for Settings {
@@ -51,6 +53,7 @@ impl Default for Settings {
             // Visible dans la barre des menus (repère discret), pas dans le Dock.
             show_in_dock: false,
             show_in_menu_bar: true,
+            launch_at_login: false,
         }
     }
 }
