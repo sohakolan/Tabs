@@ -3,4 +3,5 @@
 mod layout;
 mod overlay;
 
+pub use layout::DisplayMode;
 pub use overlay::Overlay;

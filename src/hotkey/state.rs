@@ -52,6 +52,11 @@ impl Switcher {
         self.active
     }
 
+    /// Index actuellement sélectionné.
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
     /// Met à jour le nombre d'éléments cyclables. Ignoré pendant que le
     /// sélecteur est actif, pour ne pas perturber le cycle en cours.
     pub fn set_count(&mut self, count: usize) {

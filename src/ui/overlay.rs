@@ -17,7 +17,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString};
 
-use super::layout::{self, Rect};
+use super::layout::{self, DisplayMode, Rect};
 use crate::windows::{self, Window};
 
 pub struct Overlay {
@@ -65,10 +65,11 @@ impl Overlay {
         }
     }
 
-    /// Affiche l'overlay pour `windows`, avec l'élément `selected` en évidence.
-    pub fn show(&mut self, windows: &[Window], selected: usize) {
+    /// Affiche l'overlay pour `windows`, avec l'élément `selected` en évidence,
+    /// dans le mode d'affichage demandé.
+    pub fn show(&mut self, windows: &[Window], selected: usize, mode: DisplayMode) {
         let mtm = self.mtm;
-        let lay = layout::compute(windows.len());
+        let lay = layout::compute(windows.len(), mode);
 
         // Dimensionne et centre le panneau sur l'écran principal.
         self.panel
@@ -106,11 +107,16 @@ impl Overlay {
         content.addSubview(&sel);
         self.selection = Some(sel);
 
-        // Cellules : aperçu (miniature, ou icône d'app en repli) + titre.
+        // Cellules : aperçu (selon le mode) + titre.
         for (i, w) in windows.iter().enumerate() {
             let cf = lay.cells[i];
 
-            if let Some(image) = thumbnail_or_icon(w) {
+            let image = match mode {
+                DisplayMode::Titles => None,
+                DisplayMode::AppIcons => app_icon(w),
+                DisplayMode::Thumbnails => thumbnail_or_icon(w),
+            };
+            if let Some(image) = image {
                 let view = NSImageView::imageViewWithImage(&image, mtm);
                 view.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
                 view.setFrame(to_nsrect(cf.image));
@@ -160,8 +166,12 @@ fn thumbnail_or_icon(w: &Window) -> Option<Retained<NSImage>> {
             NSSize::new(0.0, 0.0),
         ));
     }
-    let app = NSRunningApplication::runningApplicationWithProcessIdentifier(w.pid)?;
-    app.icon()
+    app_icon(w)
+}
+
+/// Icône de l'application propriétaire de la fenêtre.
+fn app_icon(w: &Window) -> Option<Retained<NSImage>> {
+    NSRunningApplication::runningApplicationWithProcessIdentifier(w.pid)?.icon()
 }
 
 /// Convertit un [`Rect`] de disposition en `NSRect`.

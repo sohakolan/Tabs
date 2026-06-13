@@ -50,7 +50,7 @@ fn main() {
         let wins = windows::list_windows();
         let selected = if wins.len() > 1 { 1 } else { 0 };
         println!("[Tabs] --demo : {} fenêtre(s), sélection {selected}", wins.len());
-        overlay.show(&wins, selected);
+        overlay.show(&wins, selected, ui::DisplayMode::Thumbnails);
         // L'overlay doit rester en vie pendant la boucle d'évènements.
         std::mem::forget(overlay);
         app.run();

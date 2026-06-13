@@ -12,7 +12,7 @@ mod state;
 
 pub use state::{Action, Input, Switcher};
 
-use crate::ui::Overlay;
+use crate::ui::{DisplayMode, Overlay};
 use crate::windows::{self, Window};
 
 use core::ffi::c_void;
@@ -30,6 +30,8 @@ use objc2_core_graphics::{
 const KEYCODE_TAB: i64 = 0x30;
 /// Code de touche virtuelle macOS pour Échap.
 const KEYCODE_ESCAPE: i64 = 0x35;
+/// Code de touche virtuelle macOS pour « m » (cycle le mode d'affichage).
+const KEYCODE_M: i64 = 0x2E;
 
 /// Masque des évènements écoutés : keyDown (10) | keyUp (11) | flagsChanged (12).
 const EVENT_MASK: u64 = (1 << 10) | (1 << 11) | (1 << 12);
@@ -40,6 +42,8 @@ struct TapState {
     /// Instantané des fenêtres pris à l'ouverture du sélecteur ; l'index
     /// sélectionné par la [`Switcher`] désigne une entrée de ce vecteur.
     windows: Vec<Window>,
+    /// Mode d'affichage courant des cellules.
+    mode: DisplayMode,
     /// L'overlay affiché à l'écran (créé à l'installation, sur le thread
     /// principal).
     overlay: Option<Overlay>,
@@ -51,6 +55,7 @@ thread_local! {
     static STATE: RefCell<TapState> = RefCell::new(TapState {
         switcher: Switcher::new(),
         windows: Vec::new(),
+        mode: DisplayMode::Thumbnails,
         overlay: None,
         port: None,
     });
@@ -148,13 +153,19 @@ unsafe extern "C-unwind" fn tap_callback(
                 dispatch(Input::Escape);
                 return swallow;
             }
+            if keycode == KEYCODE_M && is_active() {
+                cycle_mode();
+                return swallow;
+            }
             passthrough
         }
         CGEventType::KeyUp => {
             let keycode = keycode(ev);
-            // Tant que le sélecteur est actif, on retient les relâchements de
-            // Tab/Échap pour qu'ils n'atteignent pas l'application active.
-            if is_active() && (keycode == KEYCODE_TAB || keycode == KEYCODE_ESCAPE) {
+            // Tant que le sélecteur est actif, on retient les relâchements des
+            // touches qu'il consomme pour qu'elles n'atteignent pas l'app active.
+            if is_active()
+                && (keycode == KEYCODE_TAB || keycode == KEYCODE_ESCAPE || keycode == KEYCODE_M)
+            {
                 return swallow;
             }
             passthrough
@@ -197,6 +208,23 @@ fn dispatch(input: Input) {
     perform(action);
 }
 
+/// Passe au mode d'affichage suivant et redessine l'overlay (sans changer la
+/// sélection courante).
+fn cycle_mode() {
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        if !st.switcher.is_active() {
+            return;
+        }
+        st.mode = st.mode.next();
+        let selected = st.switcher.selected();
+        let st = &mut *st;
+        if let Some(overlay) = st.overlay.as_mut() {
+            overlay.show(&st.windows, selected, st.mode);
+        }
+    });
+}
+
 /// Exécute l'action décidée par la machine à états en pilotant l'overlay.
 ///
 /// M3 affiche/masque l'overlay et déplace la surbrillance ; M4 ajoutera
@@ -209,7 +237,7 @@ fn perform(action: Action) {
             return;
         };
         match action {
-            Action::Show { selected } => overlay.show(&st.windows, selected),
+            Action::Show { selected } => overlay.show(&st.windows, selected, st.mode),
             Action::Select { selected } => overlay.select(selected),
             Action::Commit { selected } => {
                 overlay.hide();

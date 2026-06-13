@@ -1,8 +1,35 @@
 //! Disposition de l'overlay : calcul pur (sans AppKit) des tailles et frames,
-//! donc testable unitairement.
+//! donc testable unitairement. Paramétré par le [`DisplayMode`].
 //!
 //! Convention de coordonnées AppKit : origine en bas à gauche, l'axe Y monte.
 //! Dans chaque cellule, l'aperçu (miniature ou icône) est au-dessus du titre.
+
+/// Mode d'affichage des cellules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisplayMode {
+    /// Miniatures des fenêtres (capture) + titre.
+    Thumbnails,
+    /// Icônes d'application (façon Dock) + titre.
+    AppIcons,
+    /// Liste compacte, titre uniquement.
+    Titles,
+}
+
+impl DisplayMode {
+    /// Mode suivant, en cycle.
+    pub fn next(self) -> Self {
+        match self {
+            DisplayMode::Thumbnails => DisplayMode::AppIcons,
+            DisplayMode::AppIcons => DisplayMode::Titles,
+            DisplayMode::Titles => DisplayMode::Thumbnails,
+        }
+    }
+
+    /// L'aperçu visuel est-il affiché dans ce mode ?
+    pub fn shows_image(self) -> bool {
+        !matches!(self, DisplayMode::Titles)
+    }
+}
 
 /// Rectangle simple en points (coordonnées AppKit, origine bas-gauche).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -16,11 +43,13 @@ pub struct Rect {
 /// Frames calculés pour une cellule (une fenêtre).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellFrame {
-    /// Zone d'aperçu : miniature de la fenêtre, ou icône d'application en repli.
+    /// Zone d'aperçu (miniature ou icône). De taille nulle en mode `Titles`.
     pub image: Rect,
     pub title: Rect,
     /// Rectangle de surbrillance derrière la cellule sélectionnée.
     pub selection: Rect,
+    /// Zone cliquable/survolable couvrant toute la cellule (pour la souris).
+    pub hit: Rect,
 }
 
 /// Résultat complet du calcul de disposition.
@@ -33,49 +62,94 @@ pub struct Layout {
 
 /// Marge extérieure du panneau.
 pub const PAD: f64 = 18.0;
-/// Largeur de la zone d'aperçu.
-pub const THUMB_W: f64 = 150.0;
-/// Hauteur de la zone d'aperçu.
-pub const THUMB_H: f64 = 96.0;
 /// Espace vertical entre l'aperçu et le titre.
 pub const GAP: f64 = 6.0;
 /// Hauteur de la zone de titre.
 pub const TITLE_H: f64 = 16.0;
-/// Largeur d'une cellule.
-pub const CELL_W: f64 = 170.0;
 
-/// Calcule la disposition pour `count` cellules disposées en une rangée
-/// horizontale.
-pub fn compute(count: usize) -> Layout {
-    let inner_h = THUMB_H + GAP + TITLE_H;
+/// Métriques dépendant du mode.
+struct Metrics {
+    image_w: f64,
+    image_h: f64,
+    cell_w: f64,
+}
+
+fn metrics(mode: DisplayMode) -> Metrics {
+    match mode {
+        DisplayMode::Thumbnails => Metrics {
+            image_w: 150.0,
+            image_h: 96.0,
+            cell_w: 170.0,
+        },
+        DisplayMode::AppIcons => Metrics {
+            image_w: 72.0,
+            image_h: 72.0,
+            cell_w: 104.0,
+        },
+        DisplayMode::Titles => Metrics {
+            image_w: 0.0,
+            image_h: 0.0,
+            cell_w: 240.0,
+        },
+    }
+}
+
+/// Calcule la disposition pour `count` cellules en une rangée horizontale,
+/// selon le mode d'affichage.
+pub fn compute(count: usize, mode: DisplayMode) -> Layout {
+    let m = metrics(mode);
+    let shows_image = mode.shows_image();
+
+    let inner_h = if shows_image {
+        m.image_h + GAP + TITLE_H
+    } else {
+        TITLE_H
+    };
     let height = inner_h + 2.0 * PAD;
-    let width = (count as f64) * CELL_W + 2.0 * PAD;
+    let width = (count as f64) * m.cell_w + 2.0 * PAD;
 
     let mut cells = Vec::with_capacity(count);
     for i in 0..count {
-        let cx = PAD + (i as f64) * CELL_W;
-        let image = Rect {
-            x: cx + (CELL_W - THUMB_W) / 2.0,
-            y: PAD + TITLE_H + GAP,
-            w: THUMB_W,
-            h: THUMB_H,
+        let cx = PAD + (i as f64) * m.cell_w;
+
+        let image = if shows_image {
+            Rect {
+                x: cx + (m.cell_w - m.image_w) / 2.0,
+                y: PAD + TITLE_H + GAP,
+                w: m.image_w,
+                h: m.image_h,
+            }
+        } else {
+            Rect {
+                x: cx,
+                y: PAD,
+                w: 0.0,
+                h: 0.0,
+            }
         };
         let title = Rect {
             x: cx + 6.0,
             y: PAD,
-            w: CELL_W - 12.0,
-            h: TITLE_H,
+            w: m.cell_w - 12.0,
+            h: if shows_image { TITLE_H } else { inner_h },
         };
         let selection = Rect {
             x: cx + 4.0,
             y: PAD - 8.0,
-            w: CELL_W - 8.0,
+            w: m.cell_w - 8.0,
             h: inner_h + 14.0,
+        };
+        let hit = Rect {
+            x: cx,
+            y: 0.0,
+            w: m.cell_w,
+            h: height,
         };
         cells.push(CellFrame {
             image,
             title,
             selection,
+            hit,
         });
     }
 
@@ -92,42 +166,65 @@ mod tests {
 
     #[test]
     fn panneau_vide() {
-        let l = compute(0);
+        let l = compute(0, DisplayMode::Thumbnails);
         assert!(l.cells.is_empty());
         assert_eq!(l.width, 2.0 * PAD);
-        assert_eq!(l.height, THUMB_H + GAP + TITLE_H + 2.0 * PAD);
     }
 
     #[test]
     fn largeur_proportionnelle_au_nombre() {
-        let l = compute(3);
+        let l = compute(3, DisplayMode::Thumbnails);
         assert_eq!(l.cells.len(), 3);
-        assert_eq!(l.width, 3.0 * CELL_W + 2.0 * PAD);
+        let cell_w = (l.width - 2.0 * PAD) / 3.0;
+        assert_eq!(l.cells[1].hit.x - l.cells[0].hit.x, cell_w);
     }
 
     #[test]
-    fn cellules_alignees_horizontalement() {
-        let l = compute(3);
-        // Chaque cellule est décalée de CELL_W vers la droite.
-        assert_eq!(l.cells[1].image.x - l.cells[0].image.x, CELL_W);
-        assert_eq!(l.cells[2].image.x - l.cells[1].image.x, CELL_W);
-    }
-
-    #[test]
-    fn apercu_au_dessus_du_titre() {
-        let l = compute(1);
+    fn apercu_au_dessus_du_titre_en_thumbnails() {
+        let l = compute(1, DisplayMode::Thumbnails);
         let c = l.cells[0];
         assert!(c.image.y > c.title.y, "l'aperçu doit être au-dessus du titre");
     }
 
     #[test]
-    fn frames_dans_les_limites_du_panneau() {
-        let l = compute(4);
+    fn titles_sans_image() {
+        let l = compute(2, DisplayMode::Titles);
         for c in &l.cells {
-            for r in [c.image, c.title, c.selection] {
-                assert!(r.x >= 0.0 && r.y >= 0.0, "{r:?} hors limites (origine)");
-                assert!(r.x + r.w <= l.width + 0.001, "{r:?} déborde en largeur");
-                assert!(r.y + r.h <= l.height + 0.001, "{r:?} déborde en hauteur");
+            assert_eq!(c.image.w, 0.0);
+            assert_eq!(c.image.h, 0.0);
+        }
+        // Plus compact qu'en thumbnails.
+        assert!(l.height < compute(2, DisplayMode::Thumbnails).height);
+    }
+
+    #[test]
+    fn appicons_plus_compact_que_thumbnails() {
+        let icons = compute(3, DisplayMode::AppIcons);
+        let thumbs = compute(3, DisplayMode::Thumbnails);
+        assert!(icons.width < thumbs.width);
+    }
+
+    #[test]
+    fn cycle_des_modes() {
+        assert_eq!(DisplayMode::Thumbnails.next(), DisplayMode::AppIcons);
+        assert_eq!(DisplayMode::AppIcons.next(), DisplayMode::Titles);
+        assert_eq!(DisplayMode::Titles.next(), DisplayMode::Thumbnails);
+    }
+
+    #[test]
+    fn frames_dans_les_limites_du_panneau() {
+        for mode in [
+            DisplayMode::Thumbnails,
+            DisplayMode::AppIcons,
+            DisplayMode::Titles,
+        ] {
+            let l = compute(4, mode);
+            for c in &l.cells {
+                for r in [c.image, c.title, c.selection, c.hit] {
+                    assert!(r.x >= 0.0 && r.y >= 0.0, "{r:?} hors limites (origine)");
+                    assert!(r.x + r.w <= l.width + 0.001, "{r:?} déborde en largeur");
+                    assert!(r.y + r.h <= l.height + 0.001, "{r:?} déborde en hauteur");
+                }
             }
         }
     }
