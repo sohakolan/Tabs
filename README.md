@@ -39,8 +39,9 @@ ScreenCaptureKit.
 | **M2** | Énumération des fenêtres visibles (`CGWindowList`, ordre z) | ✅ |
 | **M3** | Overlay : `NSPanel` non-activant, rangée icône+titre, surbrillance/navigation clavier | ✅ |
 | **M4** | Activation de la fenêtre sélectionnée → **MVP utilisable** | ✅ |
-| **M5** | Miniatures live (ScreenCaptureKit, IOSurface) | ⏳ |
-| Post-MVP | Spaces, multi-écran, recherche, styles, actions traffic-light, gestes, préférences, a11y, i18n | — |
+| **M5** | Miniatures de fenêtres (`CGWindowListCreateImage`, repli icône) | ✅ |
+| Suivant | **Modes d'affichage** (Thumbnails/AppIcons/Titles) · **interaction souris** (survol/clic) | ⏳ |
+| Post-MVP | Migration ScreenCaptureKit · Spaces · multi-écran · recherche · actions traffic-light · gestes · préférences · focus renforcé (SLPS) · a11y · i18n | — |
 
 ## Build & lancement
 

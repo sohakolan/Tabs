@@ -9,16 +9,16 @@
 //! `select` se contente de déplacer la surbrillance.
 
 use objc2::rc::Retained;
-use objc2::{msg_send, MainThreadOnly};
+use objc2::{msg_send, AllocAnyThread, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSBox, NSBoxType, NSColor, NSFont, NSImageScaling, NSImageView, NSPanel,
-    NSPopUpMenuWindowLevel, NSRunningApplication, NSScreen, NSTextAlignment, NSTextField,
+    NSBackingStoreType, NSBox, NSBoxType, NSColor, NSFont, NSImage, NSImageScaling, NSImageView,
+    NSPanel, NSPopUpMenuWindowLevel, NSRunningApplication, NSScreen, NSTextAlignment, NSTextField,
     NSTitlePosition, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString};
 
 use super::layout::{self, Rect};
-use crate::windows::Window;
+use crate::windows::{self, Window};
 
 pub struct Overlay {
     mtm: MainThreadMarker,
@@ -106,19 +106,15 @@ impl Overlay {
         content.addSubview(&sel);
         self.selection = Some(sel);
 
-        // Cellules : icône d'application + titre.
+        // Cellules : aperçu (miniature, ou icône d'app en repli) + titre.
         for (i, w) in windows.iter().enumerate() {
             let cf = lay.cells[i];
 
-            if let Some(app) =
-                NSRunningApplication::runningApplicationWithProcessIdentifier(w.pid)
-            {
-                if let Some(icon) = app.icon() {
-                    let view = NSImageView::imageViewWithImage(&icon, mtm);
-                    view.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
-                    view.setFrame(to_nsrect(cf.icon));
-                    content.addSubview(&view);
-                }
+            if let Some(image) = thumbnail_or_icon(w) {
+                let view = NSImageView::imageViewWithImage(&image, mtm);
+                view.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+                view.setFrame(to_nsrect(cf.image));
+                content.addSubview(&view);
             }
 
             let text = if w.title.is_empty() {
@@ -150,6 +146,22 @@ impl Overlay {
     pub fn hide(&self) {
         self.panel.orderOut(None);
     }
+}
+
+/// Renvoie l'aperçu d'une fenêtre : sa miniature si la capture est possible,
+/// sinon l'icône de son application.
+fn thumbnail_or_icon(w: &Window) -> Option<Retained<NSImage>> {
+    if let Some(cg) = windows::capture::capture(w.id) {
+        // NSSize(0,0) → l'image conserve sa taille en pixels, l'NSImageView
+        // la met ensuite à l'échelle dans son cadre.
+        return Some(NSImage::initWithCGImage_size(
+            NSImage::alloc(),
+            &cg,
+            NSSize::new(0.0, 0.0),
+        ));
+    }
+    let app = NSRunningApplication::runningApplicationWithProcessIdentifier(w.pid)?;
+    app.icon()
 }
 
 /// Convertit un [`Rect`] de disposition en `NSRect`.

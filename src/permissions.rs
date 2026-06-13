@@ -2,11 +2,12 @@
 //!
 //! - **Accessibilité** (obligatoire) : permet d'observer les événements clavier
 //!   globaux et de lister/activer les fenêtres des autres applications.
-//! - **Enregistrement de l'écran** (à venir, M5) : nécessaire pour capturer les
-//!   miniatures de fenêtres via ScreenCaptureKit.
+//! - **Enregistrement de l'écran** : nécessaire pour capturer les miniatures de
+//!   fenêtres (et pour lire leurs titres).
 
 use objc2_application_services::{kAXTrustedCheckOptionPrompt, AXIsProcessTrustedWithOptions};
 use objc2_core_foundation::{kCFBooleanTrue, CFBoolean, CFDictionary, CFString};
+use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
 /// Vérifie si Tabs est un client d'accessibilité de confiance.
 ///
@@ -29,4 +30,17 @@ pub fn ensure_accessibility() -> bool {
     let opaque: &CFDictionary = unsafe { &*(typed as *const _ as *const CFDictionary) };
 
     unsafe { AXIsProcessTrustedWithOptions(Some(opaque)) }
+}
+
+/// Vérifie l'accès à l'enregistrement de l'écran et, s'il manque, déclenche le
+/// prompt système. Sans cet accès, les miniatures et titres de fenêtres ne sont
+/// pas disponibles (on retombe alors sur les icônes d'application).
+///
+/// Retourne `true` si l'accès est déjà accordé.
+pub fn ensure_screen_recording() -> bool {
+    if CGPreflightScreenCaptureAccess() {
+        return true;
+    }
+    // Affiche le prompt ; l'autorisation ne prend effet qu'au prochain lancement.
+    CGRequestScreenCaptureAccess()
 }

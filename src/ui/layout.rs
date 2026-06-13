@@ -2,7 +2,7 @@
 //! donc testable unitairement.
 //!
 //! Convention de coordonnées AppKit : origine en bas à gauche, l'axe Y monte.
-//! Dans chaque cellule, l'icône est au-dessus du titre.
+//! Dans chaque cellule, l'aperçu (miniature ou icône) est au-dessus du titre.
 
 /// Rectangle simple en points (coordonnées AppKit, origine bas-gauche).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -16,7 +16,8 @@ pub struct Rect {
 /// Frames calculés pour une cellule (une fenêtre).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellFrame {
-    pub icon: Rect,
+    /// Zone d'aperçu : miniature de la fenêtre, ou icône d'application en repli.
+    pub image: Rect,
     pub title: Rect,
     /// Rectangle de surbrillance derrière la cellule sélectionnée.
     pub selection: Rect,
@@ -32,30 +33,32 @@ pub struct Layout {
 
 /// Marge extérieure du panneau.
 pub const PAD: f64 = 18.0;
-/// Côté de l'icône d'application.
-pub const ICON: f64 = 64.0;
-/// Espace vertical entre l'icône et le titre.
+/// Largeur de la zone d'aperçu.
+pub const THUMB_W: f64 = 150.0;
+/// Hauteur de la zone d'aperçu.
+pub const THUMB_H: f64 = 96.0;
+/// Espace vertical entre l'aperçu et le titre.
 pub const GAP: f64 = 6.0;
 /// Hauteur de la zone de titre.
 pub const TITLE_H: f64 = 16.0;
 /// Largeur d'une cellule.
-pub const CELL_W: f64 = 132.0;
+pub const CELL_W: f64 = 170.0;
 
 /// Calcule la disposition pour `count` cellules disposées en une rangée
 /// horizontale.
 pub fn compute(count: usize) -> Layout {
-    let inner_h = ICON + GAP + TITLE_H;
+    let inner_h = THUMB_H + GAP + TITLE_H;
     let height = inner_h + 2.0 * PAD;
     let width = (count as f64) * CELL_W + 2.0 * PAD;
 
     let mut cells = Vec::with_capacity(count);
     for i in 0..count {
         let cx = PAD + (i as f64) * CELL_W;
-        let icon = Rect {
-            x: cx + (CELL_W - ICON) / 2.0,
+        let image = Rect {
+            x: cx + (CELL_W - THUMB_W) / 2.0,
             y: PAD + TITLE_H + GAP,
-            w: ICON,
-            h: ICON,
+            w: THUMB_W,
+            h: THUMB_H,
         };
         let title = Rect {
             x: cx + 6.0,
@@ -70,7 +73,7 @@ pub fn compute(count: usize) -> Layout {
             h: inner_h + 14.0,
         };
         cells.push(CellFrame {
-            icon,
+            image,
             title,
             selection,
         });
@@ -92,7 +95,7 @@ mod tests {
         let l = compute(0);
         assert!(l.cells.is_empty());
         assert_eq!(l.width, 2.0 * PAD);
-        assert_eq!(l.height, ICON + GAP + TITLE_H + 2.0 * PAD);
+        assert_eq!(l.height, THUMB_H + GAP + TITLE_H + 2.0 * PAD);
     }
 
     #[test]
@@ -106,22 +109,22 @@ mod tests {
     fn cellules_alignees_horizontalement() {
         let l = compute(3);
         // Chaque cellule est décalée de CELL_W vers la droite.
-        assert_eq!(l.cells[1].icon.x - l.cells[0].icon.x, CELL_W);
-        assert_eq!(l.cells[2].icon.x - l.cells[1].icon.x, CELL_W);
+        assert_eq!(l.cells[1].image.x - l.cells[0].image.x, CELL_W);
+        assert_eq!(l.cells[2].image.x - l.cells[1].image.x, CELL_W);
     }
 
     #[test]
-    fn icone_au_dessus_du_titre() {
+    fn apercu_au_dessus_du_titre() {
         let l = compute(1);
         let c = l.cells[0];
-        assert!(c.icon.y > c.title.y, "l'icône doit être au-dessus du titre");
+        assert!(c.image.y > c.title.y, "l'aperçu doit être au-dessus du titre");
     }
 
     #[test]
     fn frames_dans_les_limites_du_panneau() {
         let l = compute(4);
         for c in &l.cells {
-            for r in [c.icon, c.title, c.selection] {
+            for r in [c.image, c.title, c.selection] {
                 assert!(r.x >= 0.0 && r.y >= 0.0, "{r:?} hors limites (origine)");
                 assert!(r.x + r.w <= l.width + 0.001, "{r:?} déborde en largeur");
                 assert!(r.y + r.h <= l.height + 0.001, "{r:?} déborde en hauteur");

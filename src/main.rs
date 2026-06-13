@@ -67,6 +67,16 @@ fn main() {
         );
     }
 
+    // Demande l'accès à l'enregistrement de l'écran (miniatures + titres). Sans
+    // lui, Tabs retombe sur les icônes d'application.
+    if !permissions::ensure_screen_recording() {
+        eprintln!(
+            "[Tabs] Enregistrement de l'écran non accordé : miniatures et titres \
+             indisponibles (repli sur les icônes). Autorise « Tabs » dans Réglages \
+             Système › Confidentialité et sécurité › Enregistrement de l'écran."
+        );
+    }
+
     // Installe le déclencheur clavier (Option-Tab). Sans permission
     // d'Accessibilité, le tap ne peut pas être créé ; l'application continue
     // néanmoins de tourner pour laisser l'utilisateur accorder l'accès.
