@@ -45,6 +45,9 @@ pub struct Rect {
 pub struct CellFrame {
     /// Zone d'aperçu (miniature ou icône). De taille nulle en mode `Titles`.
     pub image: Rect,
+    /// Pastille d'icône d'application posée sur la miniature (mode Thumbnails
+    /// uniquement) ; de taille nulle sinon.
+    pub badge: Rect,
     pub title: Rect,
     /// Rectangle de surbrillance derrière la cellule sélectionnée.
     pub selection: Rect,
@@ -145,8 +148,26 @@ pub fn compute(count: usize, mode: DisplayMode) -> Layout {
             w: m.cell_w,
             h: height,
         };
+        // Pastille d'icône d'app, dans le bas-centre de la miniature (Thumbnails).
+        let badge = if matches!(mode, DisplayMode::Thumbnails) {
+            let bs = 42.0;
+            Rect {
+                x: image.x + (image.w - bs) / 2.0,
+                y: image.y + 6.0,
+                w: bs,
+                h: bs,
+            }
+        } else {
+            Rect {
+                x: image.x,
+                y: image.y,
+                w: 0.0,
+                h: 0.0,
+            }
+        };
         cells.push(CellFrame {
             image,
+            badge,
             title,
             selection,
             hit,
@@ -220,7 +241,7 @@ mod tests {
         ] {
             let l = compute(4, mode);
             for c in &l.cells {
-                for r in [c.image, c.title, c.selection, c.hit] {
+                for r in [c.image, c.badge, c.title, c.selection, c.hit] {
                     assert!(r.x >= 0.0 && r.y >= 0.0, "{r:?} hors limites (origine)");
                     assert!(r.x + r.w <= l.width + 0.001, "{r:?} déborde en largeur");
                     assert!(r.y + r.h <= l.height + 0.001, "{r:?} déborde en hauteur");

@@ -232,7 +232,7 @@ impl Overlay {
 
         // Surbrillance de la sélection (placée derrière les cellules).
         self.sel_frames = lay.cells.iter().map(|c| c.selection).collect();
-        let sel_fill = NSColor::selectedContentBackgroundColor();
+        let sel_fill = NSColor::controlAccentColor().colorWithAlphaComponent(0.30);
         let sel = make_box(mtm, NSRect::ZERO, &sel_fill, 10.0);
         match lay.cells.get(selected) {
             Some(c) => sel.setFrame(to_nsrect(c.selection)),
@@ -255,6 +255,16 @@ impl Overlay {
                 view.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
                 view.setFrame(to_nsrect(cf.image));
                 content.addSubview(&view);
+            }
+
+            // Pastille d'icône d'app posée sur la miniature (mode Thumbnails).
+            if cf.badge.w > 0.0 {
+                if let Some(icon) = app_icon(w) {
+                    let badge = NSImageView::imageViewWithImage(&icon, mtm);
+                    badge.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+                    badge.setFrame(to_nsrect(cf.badge));
+                    content.addSubview(&badge);
+                }
             }
 
             let text = if w.title.is_empty() {
