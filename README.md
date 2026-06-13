@@ -58,6 +58,15 @@ make run      # build + bundle + lance dist/Tabs.app
 Au premier lancement, autorise « Tabs » dans **Réglages Système › Confidentialité et
 sécurité › Accessibilité**, puis relance.
 
+> **Permissions qui « s'oublient » après chaque rebuild ?** En signature ad-hoc, l'identité
+> de code change à chaque build et macOS redemande les permissions. Crée une fois une identité
+> de signature stable :
+> ```sh
+> make signing-setup   # crée l'identité auto-signée « Tabs Dev » (peut demander ton mot de passe)
+> make bundle          # désormais signé de façon stable
+> ```
+> Accorde alors les permissions **une dernière fois** : elles persisteront entre les rebuilds.
+
 Pour itérer rapidement pendant le développement :
 
 ```sh
