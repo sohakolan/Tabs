@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Tabs</string>
+	<key>CFBundleDisplayName</key>
+	<string>Tabs</string>
+	<key>CFBundleIdentifier</key>
+	<string>fr.myrole.tabs</string>
+	<key>CFBundleExecutable</key>
+	<string>tabs</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- Application agent : aucune icône dans le Dock, aucun menu. -->
+	<key>LSUIElement</key>
+	<true/>
+</dict>
+</plist>

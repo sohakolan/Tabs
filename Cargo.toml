@@ -1,0 +1,25 @@
+[package]
+name = "tabs"
+version = "0.1.0"
+edition = "2024"
+description = "Un window switcher façon commutateur de fenêtres pour macOS, libre et performant"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/sohakolan/Tabs"
+readme = "README.md"
+rust-version = "1.85"
+
+[dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = "0.3.2"
+objc2-application-services = "0.3.2"
+objc2-core-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+objc2-foundation = "0.3.2"
+
+# Binaire de release compact et rapide (cohérent avec l'objectif de légèreté).
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

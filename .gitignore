@@ -1,0 +1,19 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# App bundle généré
+/dist
+*.app
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Éditeurs
+/.idea
+/.vscode
+*.swp
