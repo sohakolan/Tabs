@@ -36,7 +36,7 @@ ScreenCaptureKit.
 |-------|---------|------|
 | **M0** | Scaffolding : app agent (`NSApplication` `.accessory`), permission Accessibilité, bundle `.app` | ✅ |
 | **M1** | Déclencheur Option-Tab (`CGEventTap`, cycle, commit au relâchement, annulation Échap) | ✅ |
-| **M2** | Énumération des fenêtres visibles (`CGWindowList`, ordre z) | ✅ |
+| **M2** | Énumération : `CGWindowList` filtré (apps du Dock uniquement, hors soi) + **titres réels via Accessibilité** (onglet actif, piste Spotify…) | ✅ |
 | **M3** | Overlay : `NSPanel` non-activant, rangée icône+titre, surbrillance/navigation clavier | ✅ |
 | **M4** | Activation de la fenêtre sélectionnée → **MVP utilisable** | ✅ |
 | **M5** | Miniatures de fenêtres (`CGWindowListCreateImage`, repli icône) | ✅ |

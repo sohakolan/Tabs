@@ -20,7 +20,6 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 use std::cell::RefCell;
 
-use objc2_app_kit::NSApplication;
 use objc2_core_foundation::{kCFRunLoopCommonModes, CFMachPort, CFRetained, CFRunLoop};
 use objc2_foundation::MainThreadMarker;
 use objc2_core_graphics::{
@@ -245,9 +244,9 @@ fn dispatch(input: Input) {
 /// le commutateur natif de macOS.
 fn quit() {
     crate::system::set_native_cmd_tab_enabled(true);
-    if let Some(mtm) = MainThreadMarker::new() {
-        NSApplication::sharedApplication(mtm).terminate(None);
-    }
+    // Sortie immédiate et garantie (terminate peut ne pas aboutir pour une app
+    // accessoire pilotée par un tap d'évènements).
+    std::process::exit(0);
 }
 
 /// Définit le modificateur de déclenchement (maintenu pendant le cycle).

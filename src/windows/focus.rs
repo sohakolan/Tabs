@@ -16,12 +16,8 @@ use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
 use objc2_application_services::{AXError, AXUIElement};
 use objc2_core_foundation::{kCFBooleanTrue, CFArray, CFRetained, CFString, CFType};
 
+use super::ax;
 use super::{Window, WindowId};
-
-// API privée : associe un AXUIElement de fenêtre à son identifiant CoreGraphics.
-unsafe extern "C" {
-    fn _AXUIElementGetWindow(element: &AXUIElement, out: *mut WindowId) -> i32;
-}
 
 /// Met la fenêtre `window` au premier plan et lui donne le focus.
 ///
@@ -55,9 +51,7 @@ fn raise_matching_window(app: &AXUIElement, target: WindowId) -> bool {
         }
         let element = unsafe { &*ptr };
 
-        let mut id: WindowId = 0;
-        let err = unsafe { _AXUIElementGetWindow(element, &mut id) };
-        if err != 0 || id != target {
+        if ax::window_id(element) != Some(target) {
             continue;
         }
 

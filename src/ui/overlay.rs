@@ -281,7 +281,12 @@ impl Overlay {
                 NSTextAlignment::Center
             });
             label.setTextColor(Some(&NSColor::labelColor()));
-            label.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+            let font_size = if matches!(mode, DisplayMode::Titles) {
+                14.0
+            } else {
+                11.0
+            };
+            label.setFont(Some(&NSFont::systemFontOfSize(font_size)));
             label.setFrame(to_nsrect(cf.title));
             content.addSubview(&label);
         }

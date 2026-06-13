@@ -98,9 +98,9 @@ fn metrics(mode: DisplayMode) -> Metrics {
 }
 
 /// Constantes du mode Titres (liste verticale).
-const TITLE_ROW_H: f64 = 30.0;
-const TITLE_ICON: f64 = 20.0;
-const TITLES_W: f64 = 380.0;
+const TITLE_ROW_H: f64 = 40.0;
+const TITLE_ICON: f64 = 28.0;
+const TITLES_W: f64 = 480.0;
 
 /// Calcule la disposition selon le mode : rangée horizontale (Miniatures,
 /// Icônes) ou liste verticale de haut en bas (Titres).
@@ -125,12 +125,12 @@ fn compute_titles(count: usize) -> Layout {
             w: TITLE_ICON,
             h: TITLE_ICON,
         };
-        let tx = PAD + 6.0 + TITLE_ICON + 8.0;
+        let tx = PAD + 6.0 + TITLE_ICON + 10.0;
         let title = Rect {
             x: tx,
-            y: ry + (row_h - 18.0) / 2.0,
+            y: ry + (row_h - 22.0) / 2.0,
             w: TITLES_W - tx - PAD,
-            h: 18.0,
+            h: 22.0,
         };
         let selection = Rect {
             x: 6.0,
