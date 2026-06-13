@@ -14,7 +14,7 @@ use core::ptr::{self, NonNull};
 
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
 use objc2_application_services::{AXError, AXUIElement};
-use objc2_core_foundation::{kCFBooleanTrue, CFArray, CFRetained, CFString, CFType};
+use objc2_core_foundation::{kCFBooleanFalse, kCFBooleanTrue, CFArray, CFRetained, CFString, CFType};
 
 use super::ax;
 use super::{Window, WindowId};
@@ -56,9 +56,15 @@ fn raise_matching_window(app: &AXUIElement, target: WindowId) -> bool {
         }
 
         // Fenêtre trouvée : on la lève et on la rend principale.
+        let minimized = CFString::from_static_str("AXMinimized");
         let raise = CFString::from_static_str("AXRaise");
         let main = CFString::from_static_str("AXMain");
         unsafe {
+            // Dé-minimise la fenêtre si elle était repliée.
+            if let Some(no) = kCFBooleanFalse {
+                let value: &CFType = &*(no as *const _ as *const CFType);
+                element.set_attribute_value(&minimized, value);
+            }
             element.perform_action(&raise);
             if let Some(yes) = kCFBooleanTrue {
                 let value: &CFType = &*(yes as *const _ as *const CFType);

@@ -269,12 +269,18 @@ impl Overlay {
                 }
             }
 
-            let text = if w.title.is_empty() {
+            let base = if w.title.is_empty() {
                 w.app_name.as_str()
             } else {
                 w.title.as_str()
             };
-            let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
+            // Préfixe « replié » pour les fenêtres minimisées.
+            let text = if w.minimized {
+                format!("⤓ {base}")
+            } else {
+                base.to_string()
+            };
+            let label = NSTextField::labelWithString(&NSString::from_str(&text), mtm);
             label.setAlignment(if matches!(mode, DisplayMode::Titles) {
                 NSTextAlignment::Left
             } else {

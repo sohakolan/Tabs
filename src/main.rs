@@ -35,7 +35,8 @@ fn main() {
             } else {
                 w.title.as_str()
             };
-            println!("  {i:>2}. {} — {} [id {}]", w.app_name, title, w.id);
+            let tag = if w.minimized { " [réduit]" } else { "" };
+            println!("  {i:>2}. {} — {} [id {}]{tag}", w.app_name, title, w.id);
         }
         return;
     }

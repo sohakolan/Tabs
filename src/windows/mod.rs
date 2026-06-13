@@ -18,7 +18,7 @@ pub mod focus;
 use core::ffi::c_void;
 use std::collections::{HashMap, HashSet};
 
-use objc2_app_kit::{NSApplicationActivationPolicy, NSRunningApplication};
+use objc2_app_kit::{NSApplicationActivationPolicy, NSWorkspace};
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType};
 use objc2_core_graphics::{
     kCGWindowBounds, kCGWindowLayer, kCGWindowNumber, kCGWindowOwnerName, kCGWindowOwnerPID,
@@ -41,20 +41,97 @@ pub struct Window {
     pub app_name: String,
     /// Titre réel de la fenêtre (via Accessibilité), ou chaîne vide.
     pub title: String,
+    /// La fenêtre est minimisée (repliée dans le Dock).
+    pub minimized: bool,
 }
 
-/// Liste les vraies fenêtres d'applications du Dock, de l'avant vers l'arrière.
+/// Liste les fenêtres d'applications du Dock : d'abord les fenêtres visibles
+/// (ordre z, de l'avant vers l'arrière), puis les fenêtres minimisées.
 pub fn list_windows() -> Vec<Window> {
+    let self_pid = std::process::id() as i32;
+
+    // Applications « regular » (présentes dans le Dock), hors la nôtre.
+    let apps = regular_apps(self_pid);
+    let regular_pids: HashSet<i32> = apps.iter().map(|(pid, _)| *pid).collect();
+
+    // Fenêtres vues par l'Accessibilité (titre + état minimisé) par application.
+    let mut ax_windows: HashMap<i32, Vec<ax::AxWindow>> = HashMap::new();
+    for (pid, _) in &apps {
+        ax_windows.insert(*pid, ax::windows_for_pid(*pid));
+    }
+
+    let mut out = Vec::new();
+    let mut seen: HashSet<WindowId> = HashSet::new();
+
+    // 1. Fenêtres visibles, dans l'ordre z de CGWindowList.
+    for (id, pid, app_name) in onscreen_entries(&regular_pids, self_pid) {
+        let title = ax_windows
+            .get(&pid)
+            .and_then(|v| v.iter().find(|w| w.id == id))
+            .map(|w| w.title.clone())
+            .unwrap_or_default();
+        seen.insert(id);
+        out.push(Window {
+            id,
+            pid,
+            app_name,
+            title,
+            minimized: false,
+        });
+    }
+
+    // 2. Fenêtres minimisées (absentes de la liste à l'écran).
+    for (pid, app_name) in &apps {
+        if let Some(windows) = ax_windows.get(pid) {
+            for w in windows {
+                if w.minimized && seen.insert(w.id) {
+                    out.push(Window {
+                        id: w.id,
+                        pid: *pid,
+                        app_name: app_name.clone(),
+                        title: w.title.clone(),
+                        minimized: true,
+                    });
+                }
+            }
+        }
+    }
+
+    out
+}
+
+/// Applications « regular » en cours d'exécution (icône au Dock), hors la nôtre.
+fn regular_apps(self_pid: i32) -> Vec<(i32, String)> {
+    let running = NSWorkspace::sharedWorkspace().runningApplications();
+    let mut apps = Vec::new();
+    for i in 0..running.count() {
+        let app = running.objectAtIndex(i);
+        if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
+            continue;
+        }
+        let pid = app.processIdentifier();
+        if pid == self_pid {
+            continue;
+        }
+        let name = app
+            .localizedName()
+            .map(|n| n.to_string())
+            .unwrap_or_default();
+        apps.push((pid, name));
+    }
+    apps
+}
+
+/// Identifiants des fenêtres visibles, dans l'ordre z, filtrées sur les apps du
+/// Dock, hors la nôtre, et de taille suffisante.
+fn onscreen_entries(regular_pids: &HashSet<i32>, self_pid: i32) -> Vec<(WindowId, i32, String)> {
     let option =
         CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements;
     let Some(array) = CGWindowListCopyWindowInfo(option, 0) else {
         return Vec::new();
     };
 
-    let self_pid = std::process::id() as i32;
-    let mut regular_cache: HashMap<i32, bool> = HashMap::new();
-    let mut windows = Vec::new();
-
+    let mut entries = Vec::new();
     for i in 0..array.count() {
         // SAFETY: `i` borné par `count` ; chaque entrée est un CFDictionary.
         let ptr = unsafe { array.value_at_index(i) };
@@ -63,7 +140,6 @@ pub fn list_windows() -> Vec<Window> {
         }
         let dict: &CFDictionary = unsafe { &*(ptr as *const CFDictionary) };
 
-        // Fenêtres applicatives normales uniquement (couche 0).
         if dict_i64(dict, unsafe { kCGWindowLayer }).unwrap_or(0) != 0 {
             continue;
         }
@@ -72,60 +148,18 @@ pub fn list_windows() -> Vec<Window> {
             continue;
         }
         let pid = dict_i64(dict, unsafe { kCGWindowOwnerPID }).unwrap_or(0) as i32;
-        // Pas nos propres fenêtres (préférences, overlay…).
-        if pid == self_pid {
+        if pid == self_pid || !regular_pids.contains(&pid) {
             continue;
         }
-        // Écarte les fenêtres trop petites.
         if let Some((w, h)) = window_size(dict) {
             if w < MIN_W || h < MIN_H {
                 continue;
             }
         }
-        // Uniquement les applications « regular » (celles qui ont une icône au Dock).
-        let regular = *regular_cache.entry(pid).or_insert_with(|| is_regular_app(pid));
-        if !regular {
-            continue;
-        }
-
-        let app_name = dict_string(dict, unsafe { kCGWindowOwnerName }).unwrap_or_default();
-        windows.push(Window {
-            id,
-            pid,
-            app_name,
-            title: String::new(),
-        });
+        let name = dict_string(dict, unsafe { kCGWindowOwnerName }).unwrap_or_default();
+        entries.push((id, pid, name));
     }
-
-    enrich_titles(&mut windows);
-    windows
-}
-
-/// Renseigne le titre de chaque fenêtre via l'API d'Accessibilité (un appel par
-/// application).
-fn enrich_titles(windows: &mut [Window]) {
-    let mut titles: HashMap<WindowId, String> = HashMap::new();
-    let mut seen_pids: HashSet<i32> = HashSet::new();
-    for w in windows.iter() {
-        if seen_pids.insert(w.pid) {
-            for (id, title) in ax::titles_for_pid(w.pid) {
-                titles.insert(id, title);
-            }
-        }
-    }
-    for w in windows.iter_mut() {
-        if let Some(title) = titles.get(&w.id) {
-            w.title = title.clone();
-        }
-    }
-}
-
-/// Vrai si l'application est de type « regular » (présente dans le Dock).
-fn is_regular_app(pid: i32) -> bool {
-    match NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
-        Some(app) => app.activationPolicy() == NSApplicationActivationPolicy::Regular,
-        None => false,
-    }
+    entries
 }
 
 /// Largeur/hauteur de la fenêtre depuis `kCGWindowBounds`.
