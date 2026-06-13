@@ -62,6 +62,7 @@ fn main() {
 
     // Charge les réglages et applique la visibilité (Dock / barre des menus).
     // Le contrôleur reste vivant toute la session (cible des actions de menu).
+    let first_run = !config::exists();
     let settings = config::load();
     let controller = app_ui::AppController::new(mtm, settings.clone());
     controller.apply_initial();
@@ -95,6 +96,14 @@ fn main() {
     );
     // Applique le remplacement éventuel du Cmd-Tab système.
     hotkey::set_replace_cmd_tab(settings.replace_cmd_tab);
+
+    // Au tout premier lancement, l'app est invisible : on ouvre les préférences
+    // pour que l'utilisateur sache qu'elle tourne et puisse la configurer. On
+    // matérialise le fichier de réglages pour ne le faire qu'une fois.
+    if first_run {
+        config::save(&settings);
+        controller.show_preferences();
+    }
 
     // Garde le contrôleur en vie pendant toute la durée de la boucle.
     let _controller = controller;

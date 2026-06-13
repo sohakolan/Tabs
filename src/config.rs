@@ -39,6 +39,12 @@ impl Default for Settings {
     }
 }
 
+/// Indique si le fichier de réglages existe déjà (faux au tout premier
+/// lancement).
+pub fn exists() -> bool {
+    file_path().map(|p| p.exists()).unwrap_or(false)
+}
+
 /// Charge les réglages, ou les valeurs par défaut si le fichier est absent ou
 /// illisible.
 pub fn load() -> Settings {
