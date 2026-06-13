@@ -11,9 +11,10 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSBackingStoreType, NSBox,
-    NSBoxType, NSButton, NSCellImagePosition, NSColor, NSControlStateValueOn, NSFont, NSImage,
-    NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSPopUpButton, NSStatusBar, NSStatusItem,
+    NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSAutoresizingMaskOptions,
+    NSBackingStoreType, NSBox, NSBoxType, NSButton, NSCellImagePosition, NSColor,
+    NSControlStateValueOn, NSFont, NSImage, NSImageScaling, NSImageView, NSMenu, NSMenuItem,
+    NSPopUpButton, NSStatusBar, NSStatusItem, NSTabView, NSTabViewItem, NSTextAlignment,
     NSTextField, NSTitlePosition, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{
@@ -24,8 +25,11 @@ use crate::config::{self, Settings, TriggerModifier};
 use crate::ui::DisplayMode;
 use crate::{hotkey, permissions};
 
-const WIN_W: f64 = 460.0;
-const WIN_H: f64 = 700.0;
+const WIN_W: f64 = 520.0;
+const WIN_H: f64 = 460.0;
+/// Taille utile d'un volet d'onglet (zone de contenu du NSTabView).
+const PANE_W: f64 = 470.0;
+const PANE_H: f64 = 340.0;
 
 pub(crate) struct Ivars {
     mtm: MainThreadMarker,
@@ -306,152 +310,168 @@ impl AppController {
         window.center();
         let content = window.contentView().expect("la fenêtre a une vue");
 
-        // En-tête : logo + titre.
+        // En-tête persistant : logo + titre.
         if let Some(icon) = NSApplication::sharedApplication(mtm).applicationIconImage() {
             let view = NSImageView::imageViewWithImage(&icon, mtm);
-            view.setFrame(rect(24.0, WIN_H - 82.0, 56.0, 56.0));
+            view.setFrame(rect(20.0, WIN_H - 50.0, 36.0, 36.0));
             content.addSubview(&view);
         }
-        let title = label(mtm, "Tabs", rect(92.0, WIN_H - 60.0, 300.0, 28.0));
-        title.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
+        let title = label(mtm, "Tabs", rect(66.0, WIN_H - 44.0, 300.0, 24.0));
+        title.setFont(Some(&NSFont::boldSystemFontOfSize(18.0)));
         content.addSubview(&title);
-        content.addSubview(&label(
-            mtm,
-            "Commutateur de fenêtres",
-            rect(92.0, WIN_H - 80.0, 300.0, 18.0),
-        ));
+        let sub = label(mtm, "Commutateur de fenêtres", rect(66.0, WIN_H - 62.0, 320.0, 16.0));
+        sub.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+        sub.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        content.addSubview(&sub);
 
-        // Trait de séparation sous l'en-tête.
-        let separator = make_box(mtm, rect(24.0, WIN_H - 96.0, WIN_W - 48.0, 1.0), 0.0);
-        separator.setFillColor(&NSColor::colorWithCalibratedWhite_alpha(0.5, 0.28));
-        content.addSubview(&separator);
+        // Onglets, sous l'en-tête.
+        let tabs = NSTabView::initWithFrame(
+            NSTabView::alloc(mtm),
+            rect(12.0, 12.0, WIN_W - 24.0, WIN_H - 12.0 - 60.0),
+        );
+        tabs.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable
+                | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        self.add_pane(&tabs, "Général", &self.build_general_pane(&settings));
+        self.add_pane(&tabs, "Apparence", &self.build_appearance_pane(&settings));
+        self.add_pane(&tabs, "Raccourci", &self.build_shortcut_pane(&settings));
+        self.add_pane(&tabs, "Permissions", &self.build_permissions_pane());
+        self.add_pane(&tabs, "À propos", &self.build_about_pane());
+        content.addSubview(&tabs);
 
-        // Section « Aperçu des onglets ».
-        let mut y = WIN_H - 132.0;
-        content.addSubview(&section(mtm, "Aperçu des onglets", rect(24.0, y, 400.0, 18.0)));
-        y -= 122.0;
-        let tile_w = 132.0;
+        window
+    }
+
+    fn add_pane(&self, tabs: &NSTabView, label: &str, view: &NSView) {
+        let item = NSTabViewItem::new();
+        item.setLabel(&NSString::from_str(label));
+        item.setView(Some(view));
+        tabs.addTabViewItem(&item);
+    }
+
+    /// Volet « Général » : visibilité de l'application.
+    fn build_general_pane(&self, s: &Settings) -> Retained<NSView> {
+        let mtm = self.ivars().mtm;
+        let pane = make_pane(mtm);
+        let mut y = PANE_H - 40.0;
+        pane.addSubview(&section(mtm, "Visibilité", rect(20.0, y, PANE_W - 40.0, 18.0)));
+        y -= 36.0;
+        pane.addSubview(&checkbox(mtm, "Afficher dans le Dock", sel!(toggleDock:), self,
+            s.show_in_dock, rect(20.0, y, PANE_W - 40.0, 22.0)));
+        y -= 30.0;
+        pane.addSubview(&checkbox(mtm, "Afficher dans la barre des menus", sel!(toggleMenuBar:),
+            self, s.show_in_menu_bar, rect(20.0, y, PANE_W - 40.0, 22.0)));
+        y -= 30.0;
+        pane.addSubview(&checkbox(mtm, "Lancer au démarrage", sel!(toggleLaunchAtLogin:), self,
+            s.launch_at_login, rect(20.0, y, PANE_W - 40.0, 22.0)));
+        pane
+    }
+
+    /// Volet « Apparence » : mode d'affichage avec aperçus.
+    fn build_appearance_pane(&self, s: &Settings) -> Retained<NSView> {
+        let mtm = self.ivars().mtm;
+        let pane = make_pane(mtm);
+        pane.addSubview(&section(mtm, "Mode d'affichage", rect(20.0, PANE_H - 40.0, PANE_W - 40.0, 18.0)));
+        let tile_w = 140.0;
+        let gap = 12.0;
+        let total = 3.0 * tile_w + 2.0 * gap;
+        let start = (PANE_W - total) / 2.0;
+        let ty = PANE_H - 40.0 - 134.0;
         let modes = [
             (DisplayMode::Thumbnails, "preview_thumbnails", "Miniatures", sel!(selectThumbnails:)),
             (DisplayMode::AppIcons, "preview_appicons", "Icônes d'app", sel!(selectAppIcons:)),
             (DisplayMode::Titles, "preview_titles", "Titres", sel!(selectTitles:)),
         ];
         for (i, (mode, image, label_text, action)) in modes.iter().enumerate() {
-            let x = 24.0 + (i as f64) * (tile_w + 11.0);
-            self.add_tile(
-                &content,
-                *mode,
-                image,
-                label_text,
-                *action,
-                rect(x, y, tile_w, 110.0),
-                *mode == settings.mode,
-            );
+            let x = start + (i as f64) * (tile_w + gap);
+            self.add_tile(&pane, *mode, image, label_text, *action,
+                rect(x, ty, tile_w, 118.0), *mode == s.mode);
         }
+        pane
+    }
 
-        // Section « Déclencheur ».
-        y -= 44.0;
-        content.addSubview(&section(mtm, "Déclencheur", rect(24.0, y, 400.0, 18.0)));
-        y -= 34.0;
-        content.addSubview(&label(
-            mtm,
-            "Touche maintenue (puis Tab) :",
-            rect(24.0, y, 220.0, 22.0),
-        ));
-        let trigger_idx = match settings.trigger {
+    /// Volet « Raccourci » : modificateur de déclenchement.
+    fn build_shortcut_pane(&self, s: &Settings) -> Retained<NSView> {
+        let mtm = self.ivars().mtm;
+        let pane = make_pane(mtm);
+        let mut y = PANE_H - 40.0;
+        pane.addSubview(&section(mtm, "Déclencheur", rect(20.0, y, PANE_W - 40.0, 18.0)));
+        y -= 36.0;
+        pane.addSubview(&label(mtm, "Touche maintenue (puis Tab) :", rect(20.0, y, 220.0, 22.0)));
+        let idx = match s.trigger {
             TriggerModifier::Option => 0,
             TriggerModifier::Command => 1,
             TriggerModifier::Control => 2,
         };
-        let trigger_popup = popup(
-            mtm,
-            &["⌥ Option", "⌘ Command", "⌃ Control"],
-            trigger_idx,
-            sel!(triggerChanged:),
-            self,
-            rect(250.0, y - 2.0, 180.0, 26.0),
-        );
-        content.addSubview(&trigger_popup);
-
-        y -= 36.0;
-        content.addSubview(&checkbox(
-            mtm,
-            "Désactiver le Cmd-Tab du système",
-            sel!(toggleDisableCmdTab:),
-            self,
-            settings.disable_native_cmd_tab,
-            rect(24.0, y, 410.0, 22.0),
-        ));
-
-        // Section « Apparence dans le système ».
-        y -= 44.0;
-        content.addSubview(&section(mtm, "Apparence dans le système", rect(24.0, y, 400.0, 18.0)));
-        y -= 32.0;
-        content.addSubview(&checkbox(
-            mtm,
-            "Afficher dans le Dock",
-            sel!(toggleDock:),
-            self,
-            settings.show_in_dock,
-            rect(24.0, y, 410.0, 22.0),
-        ));
-        y -= 30.0;
-        content.addSubview(&checkbox(
-            mtm,
-            "Afficher dans la barre des menus",
-            sel!(toggleMenuBar:),
-            self,
-            settings.show_in_menu_bar,
-            rect(24.0, y, 410.0, 22.0),
-        ));
-        y -= 30.0;
-        content.addSubview(&checkbox(
-            mtm,
-            "Lancer au démarrage",
-            sel!(toggleLaunchAtLogin:),
-            self,
-            settings.launch_at_login,
-            rect(24.0, y, 410.0, 22.0),
-        ));
-
-        // Section « Permissions ».
-        y -= 44.0;
-        content.addSubview(&section(mtm, "Permissions", rect(24.0, y, 400.0, 18.0)));
-        y -= 30.0;
-        self.add_permission_row(
-            &content,
-            "Accessibilité",
-            permissions::is_accessibility_granted(),
-            sel!(grantAccessibility:),
-            y,
-        );
-        y -= 30.0;
-        self.add_permission_row(
-            &content,
-            "Enregistrement de l'écran",
-            permissions::is_screen_recording_granted(),
-            sel!(grantScreenRecording:),
-            y,
-        );
-
-        // Pied : astuce + quitter.
-        let hint = label(
-            mtm,
-            "Maintiens le modificateur + Tab · « m » mode · « q » quitter l'app · « , » réglages",
-            rect(24.0, 62.0, WIN_W - 48.0, 16.0),
-        );
+        pane.addSubview(&popup(mtm, &["⌥ Option", "⌘ Command", "⌃ Control"], idx,
+            sel!(triggerChanged:), self, rect(248.0, y - 2.0, 180.0, 26.0)));
+        y -= 40.0;
+        pane.addSubview(&checkbox(mtm, "Désactiver le Cmd-Tab du système",
+            sel!(toggleDisableCmdTab:), self, s.disable_native_cmd_tab,
+            rect(20.0, y, PANE_W - 40.0, 22.0)));
+        y -= 40.0;
+        let hint = label(mtm,
+            "Pendant l'overlay : « m » change le mode · « q » quitte l'app · « , » réglages.",
+            rect(20.0, y, PANE_W - 40.0, 18.0));
         hint.setFont(Some(&NSFont::systemFontOfSize(11.0)));
         hint.setTextColor(Some(&NSColor::secondaryLabelColor()));
-        content.addSubview(&hint);
-        content.addSubview(&button(
-            mtm,
-            "Quitter Tabs",
-            sel!(quitApp:),
-            self,
-            rect(24.0, 20.0, WIN_W - 48.0, 30.0),
-        ));
+        pane.addSubview(&hint);
+        pane
+    }
 
-        window
+    /// Volet « Permissions » : état et autorisation.
+    fn build_permissions_pane(&self) -> Retained<NSView> {
+        let mtm = self.ivars().mtm;
+        let pane = make_pane(mtm);
+        let mut y = PANE_H - 40.0;
+        pane.addSubview(&section(mtm, "Permissions", rect(20.0, y, PANE_W - 40.0, 18.0)));
+        y -= 34.0;
+        self.add_permission_row(&pane, "Accessibilité",
+            permissions::is_accessibility_granted(), sel!(grantAccessibility:), y);
+        y -= 34.0;
+        self.add_permission_row(&pane, "Enregistrement de l'écran",
+            permissions::is_screen_recording_granted(), sel!(grantScreenRecording:), y);
+        y -= 40.0;
+        let note = label(mtm,
+            "L'Accessibilité est requise. L'enregistrement d'écran active les miniatures.",
+            rect(20.0, y, PANE_W - 40.0, 18.0));
+        note.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+        note.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        pane.addSubview(&note);
+        pane
+    }
+
+    /// Volet « À propos ».
+    fn build_about_pane(&self) -> Retained<NSView> {
+        let mtm = self.ivars().mtm;
+        let pane = make_pane(mtm);
+        if let Some(icon) = NSApplication::sharedApplication(mtm).applicationIconImage() {
+            let view = NSImageView::imageViewWithImage(&icon, mtm);
+            view.setFrame(rect((PANE_W - 72.0) / 2.0, PANE_H - 120.0, 72.0, 72.0));
+            pane.addSubview(&view);
+        }
+        let title = label(mtm, "Tabs", rect(0.0, PANE_H - 158.0, PANE_W, 28.0));
+        title.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
+        title.setAlignment(NSTextAlignment::Center);
+        pane.addSubview(&title);
+        for (i, (text, secondary)) in [
+            ("Commutateur de fenêtres pour macOS", true),
+            ("Version 0.1.0", false),
+            ("Libre · GPL-3.0", true),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let l = label(mtm, text, rect(0.0, PANE_H - 186.0 - (i as f64) * 22.0, PANE_W, 18.0));
+            l.setAlignment(NSTextAlignment::Center);
+            l.setFont(Some(&NSFont::systemFontOfSize(12.0)));
+            if *secondary {
+                l.setTextColor(Some(&NSColor::secondaryLabelColor()));
+            }
+            pane.addSubview(&l);
+        }
+        pane
     }
 
     /// Ajoute une tuile d'aperçu sélectionnable (image + libellé) et enregistre
@@ -536,6 +556,15 @@ impl AppController {
 
 fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {
     NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
+}
+
+/// Crée une vue de volet d'onglet (redimensionnable avec le NSTabView).
+fn make_pane(mtm: MainThreadMarker) -> Retained<NSView> {
+    let pane = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, PANE_W, PANE_H));
+    pane.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    pane
 }
 
 /// Applique le contour d'une tuile selon qu'elle est sélectionnée (accent épais)

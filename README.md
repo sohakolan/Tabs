@@ -42,7 +42,7 @@ ScreenCaptureKit.
 | **M5** | Miniatures de fenêtres (`CGWindowListCreateImage`, repli icône) | ✅ |
 | **Modes** | Affichage commutable Thumbnails/AppIcons/Titles (touche `m`) · **souris** (survol/clic) | ✅ |
 | **Réglages** | `q` quitte l'app sélectionnée (façon commutateur de fenêtres) · `,` préférences · Cmd-Q / menu pour quitter Tabs · préférences ouvertes au lancement et au clic Dock | ✅ |
-| **Préférences** | Fenêtre soignée : logo, **tuiles d'aperçu** des 3 modes, choix du **modificateur** (⌥/⌘/⌃), désactivation Cmd-Tab système, visibilité Dock/menu, **lancement au démarrage**, **statut des permissions** (bouton seulement si manquante) | ✅ |
+| **Préférences** | Vraie fenêtre **à onglets** (Général · Apparence · Raccourci · Permissions · À propos) : en-tête logo, **tuiles d'aperçu** des 3 modes, **modificateur** (⌥/⌘/⌃), visibilité Dock/menu, **lancement au démarrage**, **statut des permissions** (auto-rafraîchi) | ✅ |
 | **Identité** | Logo/icône d'app (`assets/icon.svg` → `AppIcon.icns`) + aperçus de modes, intégrés au bundle | ✅ |
 | Post-MVP | Migration ScreenCaptureKit · Spaces · multi-écran · recherche · actions traffic-light · gestes · focus renforcé (SLPS) · a11y · i18n | — |
 
