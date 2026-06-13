@@ -15,6 +15,8 @@
 //! L'élément d'accessibilité (`AXUIElement`) nécessaire pour *activer* une
 //! fenêtre sera ajouté au modèle en M4.
 
+pub mod focus;
+
 use core::ffi::c_void;
 
 use objc2_core_foundation::{CFDictionary, CFNumber, CFString, CFType};

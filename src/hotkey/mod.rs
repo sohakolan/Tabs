@@ -214,7 +214,9 @@ fn perform(action: Action) {
             Action::Commit { selected } => {
                 overlay.hide();
                 if let Some(w) = st.windows.get(selected) {
-                    println!("[Tabs] ✓ {} [id {}] (activation en M4)", w.app_name, w.id);
+                    let raised = windows::focus::activate(w);
+                    let how = if raised { "fenêtre levée" } else { "app activée" };
+                    println!("[Tabs] ✓ {} [id {}] ({how})", w.app_name, w.id);
                 }
             }
             Action::Cancel => overlay.hide(),
