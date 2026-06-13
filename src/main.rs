@@ -11,11 +11,29 @@
 
 mod hotkey;
 mod permissions;
+mod windows;
 
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::MainThreadMarker;
 
 fn main() {
+    // Mode diagnostic : `tabs --list` imprime les fenêtres détectées et quitte,
+    // sans installer le tap ni démarrer la boucle d'évènements. Pratique pour
+    // vérifier l'énumération.
+    if std::env::args().any(|a| a == "--list") {
+        let windows = windows::list_windows();
+        println!("[Tabs] {} fenêtre(s) détectée(s) (de l'avant vers l'arrière) :", windows.len());
+        for (i, w) in windows.iter().enumerate() {
+            let title = if w.title.is_empty() {
+                "(titre indisponible)"
+            } else {
+                w.title.as_str()
+            };
+            println!("  {i:>2}. {} — {} [id {}]", w.app_name, title, w.id);
+        }
+        return;
+    }
+
     let mtm = MainThreadMarker::new().expect("Tabs doit être lancé depuis le thread principal");
 
     let app = NSApplication::sharedApplication(mtm);

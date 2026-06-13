@@ -12,6 +12,8 @@ mod state;
 
 pub use state::{Action, Input, Switcher};
 
+use crate::windows::{self, Window};
+
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 use std::cell::RefCell;
@@ -30,13 +32,12 @@ const KEYCODE_ESCAPE: i64 = 0x35;
 /// Masque des évènements écoutés : keyDown (10) | keyUp (11) | flagsChanged (12).
 const EVENT_MASK: u64 = (1 << 10) | (1 << 11) | (1 << 12);
 
-/// Placeholder M1 : nombre de fenêtres simulées, pour visualiser le cycle dans
-/// les logs. M2 le remplacera par l'énumération réelle des fenêtres.
-const DEMO_WINDOW_COUNT: usize = 6;
-
 /// État partagé entre la run loop et le callback (tout sur le thread principal).
 struct TapState {
     switcher: Switcher,
+    /// Instantané des fenêtres pris à l'ouverture du sélecteur ; l'index
+    /// sélectionné par la [`Switcher`] désigne une entrée de ce vecteur.
+    windows: Vec<Window>,
     /// Conservé pour pouvoir réactiver le tap s'il est désactivé par le système.
     port: Option<CFRetained<CFMachPort>>,
 }
@@ -44,6 +45,7 @@ struct TapState {
 thread_local! {
     static STATE: RefCell<TapState> = RefCell::new(TapState {
         switcher: Switcher::new(),
+        windows: Vec::new(),
         port: None,
     });
 }
@@ -52,8 +54,6 @@ thread_local! {
 /// principal, avant `NSApplication::run`). Retourne `false` en cas d'échec
 /// (typiquement permission d'Accessibilité manquante).
 pub fn install() -> bool {
-    STATE.with(|s| s.borrow_mut().switcher.set_count(DEMO_WINDOW_COUNT));
-
     // SAFETY: signature conforme à CGEventTapCallBack ; `user_info` non utilisé
     // (l'état est dans un thread_local). `CGEventTapCreate` est déprécié au
     // profit d'une méthode non encore exposée par objc2 : on l'utilise donc tel
@@ -130,7 +130,7 @@ unsafe extern "C-unwind" fn tap_callback(
         CGEventType::KeyDown => {
             let keycode = keycode(ev);
             if keycode == KEYCODE_TAB && option_held {
-                dispatch(Input::Tab { shift: shift_held });
+                on_tab(shift_held);
                 return swallow;
             }
             if keycode == KEYCODE_ESCAPE && is_active() {
@@ -166,6 +166,21 @@ fn is_active() -> bool {
     STATE.with(|s| s.borrow().switcher.is_active())
 }
 
+/// Traite une pression sur Tab. À l'ouverture du cycle, on prend un instantané
+/// frais des fenêtres et on en informe la machine à états avant de l'activer.
+fn on_tab(shift: bool) {
+    let action = STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        if !st.switcher.is_active() {
+            let windows = windows::list_windows();
+            st.switcher.set_count(windows.len());
+            st.windows = windows;
+        }
+        st.switcher.on_input(Input::Tab { shift })
+    });
+    perform(action);
+}
+
 fn dispatch(input: Input) {
     let action = STATE.with(|s| s.borrow_mut().switcher.on_input(input));
     perform(action);
@@ -173,16 +188,36 @@ fn dispatch(input: Input) {
 
 /// Exécute l'action décidée par la machine à états.
 ///
-/// M1 se contente de tracer ; M3 (overlay) et M4 (activation de fenêtre)
-/// brancheront ici l'UI et le focus réel.
+/// M2 trace la fenêtre réelle visée ; M3 (overlay) et M4 (activation) y
+/// brancheront l'UI et le focus.
 fn perform(action: Action) {
     match action {
         Action::Show { selected } => {
-            println!("[Tabs] ▸ ouverture du sélecteur — fenêtre {selected}")
+            println!("[Tabs] ▸ ouverture du sélecteur — {}", describe(selected))
         }
-        Action::Select { selected } => println!("[Tabs]   sélection → fenêtre {selected}"),
-        Action::Commit { selected } => println!("[Tabs] ✓ activation de la fenêtre {selected}"),
+        Action::Select { selected } => println!("[Tabs]   sélection → {}", describe(selected)),
+        Action::Commit { selected } => {
+            println!("[Tabs] ✓ activation de {}", describe(selected))
+        }
         Action::Cancel => println!("[Tabs] ✕ annulé"),
         Action::None => {}
     }
+}
+
+/// Décrit la fenêtre à l'index donné dans l'instantané courant.
+fn describe(index: usize) -> String {
+    STATE.with(|s| {
+        let st = s.borrow();
+        match st.windows.get(index) {
+            Some(w) => {
+                let title = if w.title.is_empty() {
+                    "(titre indisponible)"
+                } else {
+                    w.title.as_str()
+                };
+                format!("{} — {} [id {}]", w.app_name, title, w.id)
+            }
+            None => format!("fenêtre #{index}"),
+        }
+    })
 }
