@@ -69,6 +69,19 @@ impl Switcher {
         }
     }
 
+    /// Recalcule l'état après une modification de la liste pendant un cycle
+    /// actif (ex. fermeture d'une application) : ajuste le nombre et borne la
+    /// sélection ; se désactive si plus aucun élément.
+    pub fn refresh(&mut self, count: usize) {
+        self.count = count;
+        if count == 0 {
+            self.active = false;
+            self.selected = 0;
+        } else if self.selected >= count {
+            self.selected = count - 1;
+        }
+    }
+
     /// Applique un évènement et retourne l'action à exécuter.
     pub fn on_input(&mut self, input: Input) -> Action {
         match input {
@@ -259,6 +272,19 @@ mod tests {
             s.on_input(Input::Click { index: 2 }),
             Action::Commit { selected: 2 }
         );
+        assert!(!s.is_active());
+    }
+
+    #[test]
+    fn refresh_borne_la_selection_et_desactive_si_vide() {
+        let mut s = switcher(4);
+        s.on_input(Input::Tab { shift: false }); // actif, selected = 1
+        s.on_input(Input::Tab { shift: false }); // selected = 2
+        s.on_input(Input::Tab { shift: false }); // selected = 3
+        s.refresh(2); // la liste rétrécit
+        assert!(s.is_active());
+        assert_eq!(s.selected(), 1); // borné à count-1
+        s.refresh(0); // plus rien
         assert!(!s.is_active());
     }
 

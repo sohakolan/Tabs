@@ -177,7 +177,7 @@ unsafe extern "C-unwind" fn tap_callback(
                 return swallow;
             }
             if keycode == KEYCODE_Q && is_active() {
-                quit();
+                quit_selected_app();
                 return swallow;
             }
             if keycode == KEYCODE_COMMA && is_active() {
@@ -240,13 +240,36 @@ fn dispatch(input: Input) {
     perform(action);
 }
 
-/// Quitte l'application (touche `q` pendant l'overlay), en restaurant d'abord
-/// le commutateur natif de macOS.
-fn quit() {
-    crate::system::set_native_cmd_tab_enabled(true);
-    // Sortie immédiate et garantie (terminate peut ne pas aboutir pour une app
-    // accessoire pilotée par un tap d'évènements).
-    std::process::exit(0);
+/// Quitte l'application de la fenêtre sélectionnée (comme le « Q » d'commutateur de fenêtres) et
+/// met à jour l'overlay : les fenêtres de cette app sont retirées tout de suite.
+fn quit_selected_app() {
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        if !st.switcher.is_active() {
+            return;
+        }
+        let selected = st.switcher.selected();
+        let Some(pid) = st.windows.get(selected).map(|w| w.pid) else {
+            return;
+        };
+        windows::focus::quit_app(pid);
+
+        // Retrait optimiste des fenêtres de l'app fermée.
+        st.windows.retain(|w| w.pid != pid);
+        let count = st.windows.len();
+        st.switcher.refresh(count);
+
+        let selected = st.switcher.selected();
+        let active = st.switcher.is_active();
+        let st = &mut *st;
+        if let Some(overlay) = st.overlay.as_mut() {
+            if active && count > 0 {
+                overlay.show(&st.windows, selected, st.mode);
+            } else {
+                overlay.hide();
+            }
+        }
+    });
 }
 
 /// Définit le modificateur de déclenchement (maintenu pendant le cycle).

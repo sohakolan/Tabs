@@ -36,6 +36,14 @@ pub fn activate(window: &Window) -> bool {
     raised
 }
 
+/// Demande la fermeture de l'application de PID `pid` (comme le « Q » d'commutateur de fenêtres :
+/// quitte l'application sélectionnée).
+pub fn quit_app(pid: i32) {
+    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
+        app.terminate();
+    }
+}
+
 /// Cherche dans les fenêtres de l'application celle dont l'identifiant CG
 /// correspond, puis la lève et la marque comme principale.
 fn raise_matching_window(app: &AXUIElement, target: WindowId) -> bool {

@@ -437,7 +437,7 @@ impl AppController {
         // Pied : astuce + quitter.
         let hint = label(
             mtm,
-            "Maintiens le modificateur + Tab · « m » mode · « , » réglages · « q » quitter",
+            "Maintiens le modificateur + Tab · « m » mode · « q » quitter l'app · « , » réglages",
             rect(24.0, 62.0, WIN_W - 48.0, 16.0),
         );
         hint.setFont(Some(&NSFont::systemFontOfSize(11.0)));
