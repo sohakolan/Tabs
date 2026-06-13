@@ -67,23 +67,19 @@ fn main() {
     let controller = app_ui::AppController::new(mtm, settings.clone());
     controller.apply_initial();
 
-    if permissions::ensure_accessibility() {
-        println!("[Tabs] Permission d'Accessibilité accordée.");
-    } else {
+    // On se contente de vérifier l'état des permissions au démarrage, sans
+    // jamais déclencher de prompt : la demande se fait uniquement via les
+    // boutons « Autoriser » de la fenêtre de préférences.
+    if !permissions::is_accessibility_granted() {
         eprintln!(
-            "[Tabs] Permission d'Accessibilité manquante.\n\
-             Autorise « Tabs » dans Réglages Système › Confidentialité et sécurité › \
-             Accessibilité, puis relance l'application."
+            "[Tabs] Accessibilité non accordée — ouvre les préférences (touche « , » \
+             pendant l'overlay, ou l'icône de la barre des menus) pour l'autoriser."
         );
     }
-
-    // Demande l'accès à l'enregistrement de l'écran (miniatures + titres). Sans
-    // lui, Tabs retombe sur les icônes d'application.
-    if !permissions::ensure_screen_recording() {
+    if !permissions::is_screen_recording_granted() {
         eprintln!(
-            "[Tabs] Enregistrement de l'écran non accordé : miniatures et titres \
-             indisponibles (repli sur les icônes). Autorise « Tabs » dans Réglages \
-             Système › Confidentialité et sécurité › Enregistrement de l'écran."
+            "[Tabs] Enregistrement de l'écran non accordé — miniatures indisponibles \
+             (repli sur les icônes d'application)."
         );
     }
 

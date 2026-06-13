@@ -44,13 +44,13 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        // Tout masqué par défaut : l'app ne se voit nulle part.
         Self {
             mode: DisplayMode::Thumbnails,
             trigger: TriggerModifier::Option,
             disable_native_cmd_tab: false,
+            // Visible dans la barre des menus (repère discret), pas dans le Dock.
             show_in_dock: false,
-            show_in_menu_bar: false,
+            show_in_menu_bar: true,
         }
     }
 }

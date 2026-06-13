@@ -23,7 +23,7 @@ use crate::ui::DisplayMode;
 use crate::{hotkey, permissions};
 
 const WIN_W: f64 = 460.0;
-const WIN_H: f64 = 560.0;
+const WIN_H: f64 = 660.0;
 
 pub(crate) struct Ivars {
     mtm: MainThreadMarker,
@@ -148,16 +148,8 @@ impl AppController {
         self.ivars().settings.borrow_mut().mode = mode;
         self.save();
         hotkey::set_mode(mode);
-        let accent = NSColor::controlAccentColor();
-        let clear = NSColor::clearColor();
         for (m, box_) in self.ivars().tiles.borrow().iter() {
-            if *m == mode {
-                box_.setBorderColor(&accent);
-                box_.setBorderWidth(3.0);
-            } else {
-                box_.setBorderColor(&clear);
-                box_.setBorderWidth(0.0);
-            }
+            apply_tile_border(box_, *m == mode);
         }
     }
 
@@ -246,8 +238,13 @@ impl AppController {
             rect(92.0, WIN_H - 80.0, 300.0, 18.0),
         ));
 
+        // Trait de séparation sous l'en-tête.
+        let separator = make_box(mtm, rect(24.0, WIN_H - 96.0, WIN_W - 48.0, 1.0), 0.0);
+        separator.setFillColor(&NSColor::colorWithCalibratedWhite_alpha(0.5, 0.28));
+        content.addSubview(&separator);
+
         // Section « Aperçu des onglets ».
-        let mut y = WIN_H - 118.0;
+        let mut y = WIN_H - 132.0;
         content.addSubview(&section(mtm, "Aperçu des onglets", rect(24.0, y, 400.0, 18.0)));
         y -= 122.0;
         let tile_w = 132.0;
@@ -345,13 +342,21 @@ impl AppController {
             y,
         );
 
-        // Pied : quitter.
+        // Pied : astuce + quitter.
+        let hint = label(
+            mtm,
+            "Maintiens le modificateur + Tab · « m » mode · « , » réglages · « q » quitter",
+            rect(24.0, 62.0, WIN_W - 48.0, 16.0),
+        );
+        hint.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+        hint.setTextColor(Some(&NSColor::secondaryLabelColor()));
+        content.addSubview(&hint);
         content.addSubview(&button(
             mtm,
             "Quitter Tabs",
             sel!(quitApp:),
             self,
-            rect(24.0, 20.0, 410.0, 30.0),
+            rect(24.0, 20.0, WIN_W - 48.0, 30.0),
         ));
 
         window
@@ -371,12 +376,10 @@ impl AppController {
     ) {
         let mtm = self.ivars().mtm;
 
-        // Boîte de surbrillance (contour) derrière la tuile.
+        // Carte derrière la tuile : fond léger + contour (accent si sélectionné).
         let box_ = make_box(mtm, frame, 14.0);
-        if selected {
-            box_.setBorderColor(&NSColor::controlAccentColor());
-            box_.setBorderWidth(3.0);
-        }
+        box_.setFillColor(&NSColor::colorWithCalibratedWhite_alpha(0.5, 0.08));
+        apply_tile_border(&box_, selected);
         content.addSubview(&box_);
 
         // Bouton-image cliquable (l'aperçu).
@@ -441,6 +444,18 @@ impl AppController {
 
 fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {
     NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
+}
+
+/// Applique le contour d'une tuile selon qu'elle est sélectionnée (accent épais)
+/// ou non (contour discret).
+fn apply_tile_border(box_: &NSBox, selected: bool) {
+    if selected {
+        box_.setBorderColor(&NSColor::controlAccentColor());
+        box_.setBorderWidth(3.0);
+    } else {
+        box_.setBorderColor(&NSColor::colorWithCalibratedWhite_alpha(0.5, 0.30));
+        box_.setBorderWidth(1.0);
+    }
 }
 
 fn checkbox_is_on(sender: Option<&AnyObject>) -> bool {
