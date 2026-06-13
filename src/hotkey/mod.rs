@@ -19,6 +19,7 @@ use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 use std::cell::RefCell;
 
+use objc2_app_kit::NSApplication;
 use objc2_core_foundation::{kCFRunLoopCommonModes, CFMachPort, CFRetained, CFRunLoop};
 use objc2_foundation::MainThreadMarker;
 use objc2_core_graphics::{
@@ -32,6 +33,8 @@ const KEYCODE_TAB: i64 = 0x30;
 const KEYCODE_ESCAPE: i64 = 0x35;
 /// Code de touche virtuelle macOS pour « m » (cycle le mode d'affichage).
 const KEYCODE_M: i64 = 0x2E;
+/// Code de touche virtuelle macOS pour « q » (quitte l'application).
+const KEYCODE_Q: i64 = 0x0C;
 
 /// Masque des évènements écoutés : keyDown (10) | keyUp (11) | flagsChanged (12).
 const EVENT_MASK: u64 = (1 << 10) | (1 << 11) | (1 << 12);
@@ -158,6 +161,10 @@ unsafe extern "C-unwind" fn tap_callback(
                 cycle_mode();
                 return swallow;
             }
+            if keycode == KEYCODE_Q && is_active() {
+                quit();
+                return swallow;
+            }
             passthrough
         }
         CGEventType::KeyUp => {
@@ -165,7 +172,10 @@ unsafe extern "C-unwind" fn tap_callback(
             // Tant que le sélecteur est actif, on retient les relâchements des
             // touches qu'il consomme pour qu'elles n'atteignent pas l'app active.
             if is_active()
-                && (keycode == KEYCODE_TAB || keycode == KEYCODE_ESCAPE || keycode == KEYCODE_M)
+                && (keycode == KEYCODE_TAB
+                    || keycode == KEYCODE_ESCAPE
+                    || keycode == KEYCODE_M
+                    || keycode == KEYCODE_Q)
             {
                 return swallow;
             }
@@ -207,6 +217,13 @@ fn on_tab(shift: bool) {
 fn dispatch(input: Input) {
     let action = STATE.with(|s| s.borrow_mut().switcher.on_input(input));
     perform(action);
+}
+
+/// Quitte l'application (touche `q` pendant l'overlay).
+fn quit() {
+    if let Some(mtm) = MainThreadMarker::new() {
+        NSApplication::sharedApplication(mtm).terminate(None);
+    }
 }
 
 /// Survol souris d'une cellule : déplace la sélection.
