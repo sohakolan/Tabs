@@ -1,0 +1,45 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6D7BFF"/>
+      <stop offset="1" stop-color="#9B33FF"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#ECEEFF"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#160E3A" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+
+  <!-- Fond arrondi (squircle) avec dégradé -->
+  <rect x="92" y="92" width="840" height="840" rx="200" fill="url(#bg)"/>
+  <!-- Reflet supérieur subtil -->
+  <rect x="92" y="92" width="840" height="430" rx="200" fill="#FFFFFF" opacity="0.10"/>
+
+  <!-- Pile de fenêtres (le commutateur) -->
+  <g filter="url(#shadow)">
+    <rect x="356" y="332" width="404" height="286" rx="40" fill="#FFFFFF" opacity="0.28"/>
+    <rect x="330" y="360" width="404" height="286" rx="40" fill="#FFFFFF" opacity="0.50"/>
+    <!-- Fenêtre sélectionnée, au premier plan -->
+    <rect x="300" y="392" width="424" height="300" rx="46" fill="url(#card)"/>
+  </g>
+
+  <!-- Pastilles « feux tricolores » sur la fenêtre avant -->
+  <circle cx="356" cy="442" r="15" fill="#FF5F57"/>
+  <circle cx="404" cy="442" r="15" fill="#FEBC2E"/>
+  <circle cx="452" cy="442" r="15" fill="#28C840"/>
+
+  <!-- Lignes de contenu -->
+  <rect x="344" y="498" width="300" height="24" rx="12" fill="#C7CDF2"/>
+  <rect x="344" y="548" width="210" height="24" rx="12" fill="#D7DBF7"/>
+  <rect x="344" y="598" width="252" height="24" rx="12" fill="#D7DBF7"/>
+
+  <!-- Symbole tabulation ⇥ en accent -->
+  <g fill="#6D5BFF">
+    <rect x="612" y="512" width="150" height="26" rx="13"/>
+    <path d="M712 480 L760 525 L712 570 Z"/>
+    <rect x="744" y="476" width="26" height="98" rx="13"/>
+  </g>
+</svg>

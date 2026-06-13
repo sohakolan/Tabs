@@ -12,8 +12,8 @@ use objc2::runtime::AnyObject;
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSButton,
-    NSControlStateValueOn, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem, NSTextField,
-    NSVariableStatusItemLength, NSWindow, NSWindowStyleMask,
+    NSControlStateValueOn, NSFont, NSImageView, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
+    NSTextField, NSVariableStatusItemLength, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 
@@ -181,7 +181,7 @@ impl AppController {
         let settings = self.ivars().settings.borrow().clone();
 
         let width = 360.0;
-        let height = 320.0;
+        let height = 400.0;
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
                 NSWindow::alloc(mtm),
@@ -197,8 +197,29 @@ impl AppController {
 
         let content = window.contentView().expect("la fenêtre a une vue");
 
+        // En-tête : icône de l'application + titre.
+        if let Some(icon) = NSApplication::sharedApplication(mtm).applicationIconImage() {
+            let icon_view = NSImageView::imageViewWithImage(&icon, mtm);
+            icon_view.setFrame(NSRect::new(
+                NSPoint::new(24.0, height - 96.0),
+                NSSize::new(64.0, 64.0),
+            ));
+            content.addSubview(&icon_view);
+        }
+        let title = make_label(mtm, "Tabs", NSRect::new(
+            NSPoint::new(100.0, height - 74.0),
+            NSSize::new(220.0, 28.0),
+        ));
+        title.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
+        content.addSubview(&title);
+        let subtitle = make_label(mtm, "Préférences", NSRect::new(
+            NSPoint::new(100.0, height - 96.0),
+            NSSize::new(220.0, 20.0),
+        ));
+        content.addSubview(&subtitle);
+
         // Empilement vertical (origine bas-gauche).
-        let mut y = height - 56.0;
+        let mut y = height - 150.0;
         let label = make_label(mtm, "Mode d'affichage :", NSRect::new(
             NSPoint::new(20.0, y),
             NSSize::new(150.0, 20.0),

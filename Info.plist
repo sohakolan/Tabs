@@ -10,6 +10,8 @@
 	<string>fr.myrole.tabs</string>
 	<key>CFBundleExecutable</key>
 	<string>tabs</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleVersion</key>
 	<string>0.1.0</string>
 	<key>CFBundleShortVersionString</key>

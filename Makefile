@@ -1,4 +1,8 @@
-.PHONY: build bundle run dev test clean
+.PHONY: build bundle run dev test clean icon
+
+# Régénère assets/AppIcon.icns depuis assets/icon.svg.
+icon:
+	./scripts/make_icon.sh
 
 # Compilation release du binaire.
 build:

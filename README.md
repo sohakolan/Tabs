@@ -43,6 +43,7 @@ ScreenCaptureKit.
 | **Modes** | Affichage commutable Thumbnails/AppIcons/Titles (touche `m`) · **souris** (survol/clic) | ✅ |
 | **Réglages** | `q` quitte · `,` ouvre les préférences (mode, visibilité, permissions) · visibilité Dock + barre des menus **off par défaut** · réglages persistés | ✅ |
 | **Cmd-Tab** | Option de remplacement du Cmd-Tab natif (désactive le commutateur système, déclencheur = Cmd-Tab) | ✅ |
+| **Identité** | Logo/icône d'app (`assets/icon.svg` → `AppIcon.icns`) intégré au bundle · en-tête dans les préférences | ✅ |
 | Post-MVP | Migration ScreenCaptureKit · Spaces · multi-écran · recherche · actions traffic-light · gestes · focus renforcé (SLPS) · a11y · i18n | — |
 
 ## Build & lancement
