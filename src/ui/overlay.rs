@@ -13,9 +13,11 @@ use core::cell::{Cell, RefCell};
 use objc2::rc::Retained;
 use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSBackingStoreType, NSBox, NSBoxType, NSColor, NSEvent, NSFont, NSImage, NSImageScaling,
+    NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSBackingStoreType, NSBox,
+    NSBoxType, NSColor, NSEvent, NSFont, NSImage, NSImageScaling,
     NSImageView, NSPanel, NSPopUpMenuWindowLevel, NSRunningApplication, NSScreen, NSTextAlignment,
     NSTextField, NSTitlePosition, NSTrackingArea, NSTrackingAreaOptions, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
     NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString};
@@ -181,6 +183,9 @@ impl Overlay {
         );
         // Nécessaire pour recevoir les évènements `mouseMoved`.
         panel.setAcceptsMouseMovedEvents(true);
+        // Apparence sombre : contraste propre sur le verre dépoli.
+        let dark = NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua });
+        panel.setAppearance(dark.as_deref());
 
         // Vue de contenu personnalisée qui capte la souris.
         let view = OverlayView::new(mtm, on_hover, on_click);
@@ -220,15 +225,12 @@ impl Overlay {
         // Repart d'une vue vide.
         content.setSubviews(&NSArray::new());
 
-        // Fond translucide arrondi.
-        let bg_fill = NSColor::colorWithCalibratedWhite_alpha(0.14, 0.92);
-        let bg = make_box(
+        // Fond en verre dépoli (glassmorphisme) à coins arrondis.
+        let glass = make_glass(
             mtm,
             NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(lay.width, lay.height)),
-            &bg_fill,
-            16.0,
         );
-        content.addSubview(&bg);
+        content.addSubview(&glass);
 
         // Surbrillance de la sélection (placée derrière les cellules).
         self.sel_frames = lay.cells.iter().map(|c| c.selection).collect();
@@ -246,7 +248,7 @@ impl Overlay {
             let cf = lay.cells[i];
 
             let image = match mode {
-                DisplayMode::Titles => None,
+                DisplayMode::Titles => app_icon(w),
                 DisplayMode::AppIcons => app_icon(w),
                 DisplayMode::Thumbnails => thumbnail_or_icon(w),
             };
@@ -273,7 +275,11 @@ impl Overlay {
                 w.title.as_str()
             };
             let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
-            label.setAlignment(NSTextAlignment::Center);
+            label.setAlignment(if matches!(mode, DisplayMode::Titles) {
+                NSTextAlignment::Left
+            } else {
+                NSTextAlignment::Center
+            });
             label.setTextColor(Some(&NSColor::labelColor()));
             label.setFont(Some(&NSFont::systemFontOfSize(11.0)));
             label.setFrame(to_nsrect(cf.title));
@@ -321,6 +327,22 @@ fn app_icon(w: &Window) -> Option<Retained<NSImage>> {
 /// Convertit un [`Rect`] de disposition en `NSRect`.
 fn to_nsrect(r: Rect) -> NSRect {
     NSRect::new(NSPoint::new(r.x, r.y), NSSize::new(r.w, r.h))
+}
+
+/// Crée la vue de fond en verre dépoli (flou translucide) à coins arrondis.
+fn make_glass(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSVisualEffectView> {
+    // SAFETY: initWithFrame: est l'initialiseur correct d'une NSView.
+    let view: Retained<NSVisualEffectView> =
+        unsafe { msg_send![NSVisualEffectView::alloc(mtm), initWithFrame: frame] };
+    view.setMaterial(NSVisualEffectMaterial::HUDWindow);
+    view.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+    view.setState(NSVisualEffectState::Active);
+    view.setWantsLayer(true);
+    if let Some(layer) = view.layer() {
+        layer.setCornerRadius(18.0);
+        layer.setMasksToBounds(true);
+    }
+    view
 }
 
 /// Crée une `NSBox` sans titre ni bordure, au fond plein et aux coins arrondis.

@@ -97,9 +97,76 @@ fn metrics(mode: DisplayMode) -> Metrics {
     }
 }
 
-/// Calcule la disposition pour `count` cellules en une rangée horizontale,
-/// selon le mode d'affichage.
+/// Constantes du mode Titres (liste verticale).
+const TITLE_ROW_H: f64 = 30.0;
+const TITLE_ICON: f64 = 20.0;
+const TITLES_W: f64 = 380.0;
+
+/// Calcule la disposition selon le mode : rangée horizontale (Miniatures,
+/// Icônes) ou liste verticale de haut en bas (Titres).
 pub fn compute(count: usize, mode: DisplayMode) -> Layout {
+    if matches!(mode, DisplayMode::Titles) {
+        return compute_titles(count);
+    }
+    compute_row(count, mode)
+}
+
+/// Liste verticale : un élément par ligne (de haut en bas), icône + titre.
+fn compute_titles(count: usize) -> Layout {
+    let row_h = TITLE_ROW_H;
+    let height = (count as f64) * row_h + 2.0 * PAD;
+    let mut cells = Vec::with_capacity(count);
+    for i in 0..count {
+        // Premier élément en haut : y décroît avec l'index.
+        let ry = height - PAD - (i as f64 + 1.0) * row_h;
+        let image = Rect {
+            x: PAD + 6.0,
+            y: ry + (row_h - TITLE_ICON) / 2.0,
+            w: TITLE_ICON,
+            h: TITLE_ICON,
+        };
+        let tx = PAD + 6.0 + TITLE_ICON + 8.0;
+        let title = Rect {
+            x: tx,
+            y: ry + (row_h - 18.0) / 2.0,
+            w: TITLES_W - tx - PAD,
+            h: 18.0,
+        };
+        let selection = Rect {
+            x: 6.0,
+            y: ry + 1.0,
+            w: TITLES_W - 12.0,
+            h: row_h - 2.0,
+        };
+        let hit = Rect {
+            x: 0.0,
+            y: ry,
+            w: TITLES_W,
+            h: row_h,
+        };
+        let badge = Rect {
+            x: image.x,
+            y: image.y,
+            w: 0.0,
+            h: 0.0,
+        };
+        cells.push(CellFrame {
+            image,
+            badge,
+            title,
+            selection,
+            hit,
+        });
+    }
+    Layout {
+        width: TITLES_W,
+        height,
+        cells,
+    }
+}
+
+/// Rangée horizontale (Miniatures / Icônes).
+fn compute_row(count: usize, mode: DisplayMode) -> Layout {
     let m = metrics(mode);
     let shows_image = mode.shows_image();
 
@@ -208,14 +275,16 @@ mod tests {
     }
 
     #[test]
-    fn titles_sans_image() {
-        let l = compute(2, DisplayMode::Titles);
-        for c in &l.cells {
-            assert_eq!(c.image.w, 0.0);
-            assert_eq!(c.image.h, 0.0);
-        }
-        // Plus compact qu'en thumbnails.
-        assert!(l.height < compute(2, DisplayMode::Thumbnails).height);
+    fn titles_liste_verticale() {
+        let l = compute(3, DisplayMode::Titles);
+        // Largeur fixe, hauteur qui croît avec le nombre d'éléments.
+        assert_eq!(l.width, compute(5, DisplayMode::Titles).width);
+        assert!(compute(5, DisplayMode::Titles).height > l.height);
+        // Empilées de haut en bas : le premier élément est plus haut (y plus grand).
+        assert!(l.cells[0].hit.y > l.cells[1].hit.y);
+        assert!(l.cells[1].hit.y > l.cells[2].hit.y);
+        // Chaque ligne a une petite icône à gauche.
+        assert!(l.cells[0].image.w > 0.0);
     }
 
     #[test]

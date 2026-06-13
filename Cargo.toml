@@ -15,6 +15,7 @@ objc2-application-services = { version = "0.3.2", features = ["libc"] }
 objc2-core-foundation = "0.3.2"
 objc2-core-graphics = "0.3.2"
 objc2-foundation = "0.3.2"
+objc2-quartz-core = "0.3.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 
