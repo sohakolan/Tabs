@@ -16,7 +16,9 @@ use objc2_app_kit::{
     NSImageScaling, NSImageView, NSMenu, NSMenuItem, NSPopUpButton, NSStatusBar, NSStatusItem,
     NSTextField, NSTitlePosition, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
 };
-use objc2_foundation::{MainThreadMarker, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{
+    MainThreadMarker, NSNotification, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+};
 
 use crate::config::{self, Settings, TriggerModifier};
 use crate::ui::DisplayMode;
@@ -50,8 +52,9 @@ define_class!(
 
         #[unsafe(method(quitApp:))]
         fn action_quit(&self, _sender: Option<&AnyObject>) {
+            // Restaure le commutateur natif puis quitte de façon garantie.
             crate::system::set_native_cmd_tab_enabled(true);
-            NSApplication::sharedApplication(self.ivars().mtm).terminate(None);
+            std::process::exit(0);
         }
 
         #[unsafe(method(selectThumbnails:))]
@@ -143,6 +146,13 @@ define_class!(
             self.show_preferences();
             true
         }
+
+        // Au retour au premier plan (ex. après avoir accordé une permission dans
+        // Réglages Système), rafraîchit les statuts si les préférences sont ouvertes.
+        #[unsafe(method(applicationDidBecomeActive:))]
+        fn application_did_become_active(&self, _notification: &NSNotification) {
+            self.refresh_preferences_if_open();
+        }
     }
 );
 
@@ -219,12 +229,60 @@ impl AppController {
         menu
     }
 
+    /// Installe un menu principal minimal (menu application) pour que Cmd-Q
+    /// quitte Tabs quand l'application est active (fenêtre de préférences).
+    pub fn install_main_menu(&self) {
+        let mtm = self.ivars().mtm;
+        let main = NSMenu::new(mtm);
+        let app_item = NSMenuItem::new(mtm);
+        main.addItem(&app_item);
+
+        let submenu = NSMenu::new(mtm);
+        let quit = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str("Quitter Tabs"),
+                Some(sel!(quitApp:)),
+                &NSString::from_str("q"),
+            )
+        };
+        let target: &AnyObject = self;
+        unsafe { quit.setTarget(Some(target)) };
+        submenu.addItem(&quit);
+        app_item.setSubmenu(Some(&submenu));
+
+        NSApplication::sharedApplication(mtm).setMainMenu(Some(&main));
+    }
+
     /// Affiche la fenêtre de préférences (reconstruite à chaque ouverture pour
     /// refléter l'état courant : sélection, statuts de permissions).
     pub fn show_preferences(&self) {
+        NSApplication::sharedApplication(self.ivars().mtm).activate();
+        self.present_preferences();
+    }
+
+    /// Reconstruit et réaffiche la fenêtre de préférences si elle est déjà
+    /// ouverte (sans réactiver l'app) — pour rafraîchir les statuts.
+    fn refresh_preferences_if_open(&self) {
+        let visible = self
+            .ivars()
+            .prefs_window
+            .borrow()
+            .as_ref()
+            .map(|w| w.isVisible())
+            .unwrap_or(false);
+        if visible {
+            self.present_preferences();
+        }
+    }
+
+    /// Construit une fenêtre de préférences fraîche et l'affiche (en fermant la
+    /// précédente).
+    fn present_preferences(&self) {
+        if let Some(old) = self.ivars().prefs_window.borrow_mut().take() {
+            old.orderOut(None);
+        }
         let window = self.build_preferences_window();
-        let app = NSApplication::sharedApplication(self.ivars().mtm);
-        app.activate();
         window.makeKeyAndOrderFront(None);
         *self.ivars().prefs_window.borrow_mut() = Some(window);
     }

@@ -69,6 +69,7 @@ fn main() {
     let settings = config::load();
     let controller = app_ui::AppController::new(mtm, settings.clone());
     controller.apply_initial();
+    controller.install_main_menu();
 
     // On se contente de vérifier l'état des permissions au démarrage, sans
     // jamais déclencher de prompt : la demande se fait uniquement via les
