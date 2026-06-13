@@ -35,6 +35,8 @@ const KEYCODE_ESCAPE: i64 = 0x35;
 const KEYCODE_M: i64 = 0x2E;
 /// Code de touche virtuelle macOS pour « q » (quitte l'application).
 const KEYCODE_Q: i64 = 0x0C;
+/// Code de touche virtuelle macOS pour « , » (ouvre les préférences).
+const KEYCODE_COMMA: i64 = 0x2B;
 
 /// Masque des évènements écoutés : keyDown (10) | keyUp (11) | flagsChanged (12).
 const EVENT_MASK: u64 = (1 << 10) | (1 << 11) | (1 << 12);
@@ -50,6 +52,8 @@ struct TapState {
     /// L'overlay affiché à l'écran (créé à l'installation, sur le thread
     /// principal).
     overlay: Option<Overlay>,
+    /// Rappel pour ouvrir la fenêtre de préférences (touche `,`).
+    on_open_prefs: Box<dyn Fn()>,
     /// Conservé pour pouvoir réactiver le tap s'il est désactivé par le système.
     port: Option<CFRetained<CFMachPort>>,
 }
@@ -60,6 +64,7 @@ thread_local! {
         windows: Vec::new(),
         mode: DisplayMode::Thumbnails,
         overlay: None,
+        on_open_prefs: Box::new(|| {}),
         port: None,
     });
 }
@@ -67,12 +72,17 @@ thread_local! {
 /// Installe le tap clavier sur la run loop courante (à appeler depuis le thread
 /// principal, avant `NSApplication::run`). Retourne `false` en cas d'échec
 /// (typiquement permission d'Accessibilité manquante).
-pub fn install() -> bool {
+pub fn install(initial_mode: DisplayMode, on_open_prefs: Box<dyn Fn()>) -> bool {
     // L'overlay vit sur le thread principal (objets AppKit non-Send). On lui
     // confie les rappels souris, branchés sur la même machine à états.
     let mtm = MainThreadMarker::new().expect("install doit s'exécuter sur le thread principal");
     let overlay = Overlay::new(mtm, Box::new(mouse_hover), Box::new(mouse_click));
-    STATE.with(|s| s.borrow_mut().overlay = Some(overlay));
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.overlay = Some(overlay);
+        st.mode = initial_mode;
+        st.on_open_prefs = on_open_prefs;
+    });
 
     // SAFETY: signature conforme à CGEventTapCallBack ; `user_info` non utilisé
     // (l'état est dans un thread_local). `CGEventTapCreate` est déprécié au
@@ -165,6 +175,10 @@ unsafe extern "C-unwind" fn tap_callback(
                 quit();
                 return swallow;
             }
+            if keycode == KEYCODE_COMMA && is_active() {
+                open_prefs();
+                return swallow;
+            }
             passthrough
         }
         CGEventType::KeyUp => {
@@ -175,7 +189,8 @@ unsafe extern "C-unwind" fn tap_callback(
                 && (keycode == KEYCODE_TAB
                     || keycode == KEYCODE_ESCAPE
                     || keycode == KEYCODE_M
-                    || keycode == KEYCODE_Q)
+                    || keycode == KEYCODE_Q
+                    || keycode == KEYCODE_COMMA)
             {
                 return swallow;
             }
@@ -224,6 +239,28 @@ fn quit() {
     if let Some(mtm) = MainThreadMarker::new() {
         NSApplication::sharedApplication(mtm).terminate(None);
     }
+}
+
+/// Ouvre les préférences (touche `,`) : ferme d'abord l'overlay.
+fn open_prefs() {
+    dispatch(Input::Escape);
+    STATE.with(|s| (s.borrow().on_open_prefs)());
+}
+
+/// Change le mode d'affichage depuis l'extérieur (préférences) et redessine
+/// l'overlay s'il est ouvert.
+pub fn set_mode(mode: DisplayMode) {
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.mode = mode;
+        if st.switcher.is_active() {
+            let selected = st.switcher.selected();
+            let st = &mut *st;
+            if let Some(overlay) = st.overlay.as_mut() {
+                overlay.show(&st.windows, selected, mode);
+            }
+        }
+    });
 }
 
 /// Survol souris d'une cellule : déplace la sélection.

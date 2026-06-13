@@ -9,6 +9,8 @@
 //! des autres applications. Les jalons suivants y branchent le tap clavier,
 //! l'énumération des fenêtres et l'overlay.
 
+mod app_ui;
+mod config;
 mod hotkey;
 mod permissions;
 mod ui;
@@ -57,6 +59,12 @@ fn main() {
         return;
     }
 
+    // Charge les réglages et applique la visibilité (Dock / barre des menus).
+    // Le contrôleur reste vivant toute la session (cible des actions de menu).
+    let settings = config::load();
+    let controller = app_ui::AppController::new(mtm, settings.clone());
+    controller.apply_initial();
+
     if permissions::ensure_accessibility() {
         println!("[Tabs] Permission d'Accessibilité accordée.");
     } else {
@@ -77,12 +85,17 @@ fn main() {
         );
     }
 
-    // Installe le déclencheur clavier (Option-Tab). Sans permission
-    // d'Accessibilité, le tap ne peut pas être créé ; l'application continue
-    // néanmoins de tourner pour laisser l'utilisateur accorder l'accès.
-    hotkey::install();
+    // Installe le déclencheur clavier (Option-Tab). La touche `,` ouvre les
+    // préférences via le contrôleur.
+    let prefs_controller = controller.clone();
+    hotkey::install(
+        settings.mode,
+        Box::new(move || prefs_controller.show_preferences()),
+    );
 
-    // Boucle d'événements AppKit. Le tap clavier y est greffé ; l'overlay (M3)
-    // viendra s'y ajouter.
+    // Garde le contrôleur en vie pendant toute la durée de la boucle.
+    let _controller = controller;
+
+    // Boucle d'événements AppKit.
     app.run();
 }

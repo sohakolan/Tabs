@@ -5,7 +5,7 @@
 //! Dans chaque cellule, l'aperçu (miniature ou icône) est au-dessus du titre.
 
 /// Mode d'affichage des cellules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DisplayMode {
     /// Miniatures des fenêtres (capture) + titre.
     Thumbnails,
