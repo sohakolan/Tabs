@@ -9,6 +9,7 @@
 //! des autres applications. Les jalons suivants y branchent le tap clavier,
 //! l'énumération des fenêtres et l'overlay.
 
+mod hotkey;
 mod permissions;
 
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
@@ -31,7 +32,12 @@ fn main() {
         );
     }
 
-    // Boucle d'événements AppKit. Pour l'instant l'application ne fait que
-    // tourner ; le tap clavier (M1) et l'overlay (M3) viendront s'y greffer.
+    // Installe le déclencheur clavier (Option-Tab). Sans permission
+    // d'Accessibilité, le tap ne peut pas être créé ; l'application continue
+    // néanmoins de tourner pour laisser l'utilisateur accorder l'accès.
+    hotkey::install();
+
+    // Boucle d'événements AppKit. Le tap clavier y est greffé ; l'overlay (M3)
+    // viendra s'y ajouter.
     app.run();
 }
