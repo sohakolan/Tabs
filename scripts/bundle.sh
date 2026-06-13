@@ -18,6 +18,7 @@ mkdir -p "$MACOS" "$RES"
 cp target/release/tabs "$MACOS/tabs"
 cp Info.plist "$APP/Contents/Info.plist"
 cp assets/AppIcon.icns "$RES/AppIcon.icns"
+cp assets/preview_thumbnails.png assets/preview_appicons.png assets/preview_titles.png "$RES/"
 
 # Signature ad-hoc : suffisante pour le développement local et pour que macOS
 # garde une identité stable des permissions (Accessibilité, Enregistrement de

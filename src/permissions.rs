@@ -5,7 +5,9 @@
 //! - **Enregistrement de l'écran** : nécessaire pour capturer les miniatures de
 //!   fenêtres (et pour lire leurs titres).
 
-use objc2_application_services::{kAXTrustedCheckOptionPrompt, AXIsProcessTrustedWithOptions};
+use objc2_application_services::{
+    kAXTrustedCheckOptionPrompt, AXIsProcessTrusted, AXIsProcessTrustedWithOptions,
+};
 use objc2_core_foundation::{kCFBooleanTrue, CFBoolean, CFDictionary, CFString};
 use objc2_core_graphics::{CGPreflightScreenCaptureAccess, CGRequestScreenCaptureAccess};
 
@@ -30,6 +32,17 @@ pub fn ensure_accessibility() -> bool {
     let opaque: &CFDictionary = unsafe { &*(typed as *const _ as *const CFDictionary) };
 
     unsafe { AXIsProcessTrustedWithOptions(Some(opaque)) }
+}
+
+/// Indique si la permission d'Accessibilité est accordée (sans déclencher de
+/// prompt).
+pub fn is_accessibility_granted() -> bool {
+    unsafe { AXIsProcessTrusted() }
+}
+
+/// Indique si l'accès à l'enregistrement de l'écran est accordé (sans prompt).
+pub fn is_screen_recording_granted() -> bool {
+    CGPreflightScreenCaptureAccess()
 }
 
 /// Vérifie l'accès à l'enregistrement de l'écran et, s'il manque, déclenche le

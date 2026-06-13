@@ -12,19 +12,34 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::DisplayMode;
 
+/// Modificateur maintenu pour déclencher et parcourir le sélecteur (+ Tab).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TriggerModifier {
+    Option,
+    Command,
+    Control,
+}
+
+impl Default for TriggerModifier {
+    fn default() -> Self {
+        Self::Option
+    }
+}
+
 /// Réglages de l'utilisateur.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Mode d'affichage des cellules.
     pub mode: DisplayMode,
+    /// Modificateur de déclenchement (maintenu pendant le cycle).
+    pub trigger: TriggerModifier,
+    /// Désactiver le commutateur d'applications natif (Cmd-Tab) de macOS.
+    pub disable_native_cmd_tab: bool,
     /// Afficher l'icône de l'application dans le Dock.
     pub show_in_dock: bool,
     /// Afficher l'icône de l'application dans la barre des menus.
     pub show_in_menu_bar: bool,
-    /// Remplacer le Cmd-Tab natif de macOS par Tabs (déclencheur = Cmd-Tab et
-    /// désactivation du commutateur système).
-    pub replace_cmd_tab: bool,
 }
 
 impl Default for Settings {
@@ -32,9 +47,10 @@ impl Default for Settings {
         // Tout masqué par défaut : l'app ne se voit nulle part.
         Self {
             mode: DisplayMode::Thumbnails,
+            trigger: TriggerModifier::Option,
+            disable_native_cmd_tab: false,
             show_in_dock: false,
             show_in_menu_bar: false,
-            replace_cmd_tab: false,
         }
     }
 }

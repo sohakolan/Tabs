@@ -8,23 +8,31 @@
 use core::cell::RefCell;
 
 use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSButton,
-    NSControlStateValueOn, NSFont, NSImageView, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
-    NSTextField, NSVariableStatusItemLength, NSWindow, NSWindowStyleMask,
+    NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSBox, NSBoxType, NSButton,
+    NSCellImagePosition, NSColor, NSControlStateValueOn, NSFont, NSImage, NSImageScaling,
+    NSImageView, NSMenu, NSMenuItem, NSPopUpButton, NSStatusBar, NSStatusItem, NSTextField,
+    NSTitlePosition, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 
-use crate::config::{self, Settings};
+use crate::config::{self, Settings, TriggerModifier};
+use crate::ui::DisplayMode;
 use crate::{hotkey, permissions};
+
+const WIN_W: f64 = 460.0;
+const WIN_H: f64 = 560.0;
 
 pub(crate) struct Ivars {
     mtm: MainThreadMarker,
     settings: RefCell<Settings>,
     prefs_window: RefCell<Option<Retained<NSWindow>>>,
     status_item: RefCell<Option<Retained<NSStatusItem>>>,
+    /// Boîtes de surbrillance des tuiles de mode (pour mettre à jour la
+    /// sélection), reconstruites à chaque ouverture des préférences.
+    tiles: RefCell<Vec<(DisplayMode, Retained<NSBox>)>>,
 }
 
 define_class!(
@@ -42,23 +50,47 @@ define_class!(
 
         #[unsafe(method(quitApp:))]
         fn action_quit(&self, _sender: Option<&AnyObject>) {
-            // Restaure le commutateur natif avant de quitter.
             crate::system::set_native_cmd_tab_enabled(true);
             NSApplication::sharedApplication(self.ivars().mtm).terminate(None);
         }
 
-        #[unsafe(method(cycleMode:))]
-        fn action_cycle_mode(&self, sender: Option<&AnyObject>) {
-            let next = {
-                let mut s = self.ivars().settings.borrow_mut();
-                s.mode = s.mode.next();
-                s.mode
+        #[unsafe(method(selectThumbnails:))]
+        fn action_mode_thumbnails(&self, _sender: Option<&AnyObject>) {
+            self.select_mode(DisplayMode::Thumbnails);
+        }
+
+        #[unsafe(method(selectAppIcons:))]
+        fn action_mode_appicons(&self, _sender: Option<&AnyObject>) {
+            self.select_mode(DisplayMode::AppIcons);
+        }
+
+        #[unsafe(method(selectTitles:))]
+        fn action_mode_titles(&self, _sender: Option<&AnyObject>) {
+            self.select_mode(DisplayMode::Titles);
+        }
+
+        #[unsafe(method(triggerChanged:))]
+        fn action_trigger_changed(&self, sender: Option<&AnyObject>) {
+            let idx = sender
+                .and_then(|s| s.downcast_ref::<NSPopUpButton>())
+                .map(|p| p.indexOfSelectedItem())
+                .unwrap_or(0);
+            let modifier = match idx {
+                1 => TriggerModifier::Command,
+                2 => TriggerModifier::Control,
+                _ => TriggerModifier::Option,
             };
+            self.ivars().settings.borrow_mut().trigger = modifier;
             self.save();
-            hotkey::set_mode(next);
-            if let Some(button) = sender.and_then(|s| s.downcast_ref::<NSButton>()) {
-                button.setTitle(&NSString::from_str(mode_label(next)));
-            }
+            hotkey::set_trigger_modifier(modifier);
+        }
+
+        #[unsafe(method(toggleDisableCmdTab:))]
+        fn action_toggle_disable_cmd_tab(&self, sender: Option<&AnyObject>) {
+            let on = checkbox_is_on(sender);
+            self.ivars().settings.borrow_mut().disable_native_cmd_tab = on;
+            self.save();
+            hotkey::set_disable_native_cmd_tab(on);
         }
 
         #[unsafe(method(toggleDock:))]
@@ -75,14 +107,6 @@ define_class!(
             self.ivars().settings.borrow_mut().show_in_menu_bar = on;
             self.save();
             self.apply_menu_bar_visibility();
-        }
-
-        #[unsafe(method(toggleReplaceCmdTab:))]
-        fn action_toggle_replace_cmd_tab(&self, sender: Option<&AnyObject>) {
-            let on = checkbox_is_on(sender);
-            self.ivars().settings.borrow_mut().replace_cmd_tab = on;
-            self.save();
-            hotkey::set_replace_cmd_tab(on);
         }
 
         #[unsafe(method(grantAccessibility:))]
@@ -104,6 +128,7 @@ impl AppController {
             settings: RefCell::new(settings),
             prefs_window: RefCell::new(None),
             status_item: RefCell::new(None),
+            tiles: RefCell::new(Vec::new()),
         });
         // SAFETY: init de NSObject.
         unsafe { msg_send![super(this), init] }
@@ -117,6 +142,23 @@ impl AppController {
 
     fn save(&self) {
         config::save(&self.ivars().settings.borrow());
+    }
+
+    fn select_mode(&self, mode: DisplayMode) {
+        self.ivars().settings.borrow_mut().mode = mode;
+        self.save();
+        hotkey::set_mode(mode);
+        let accent = NSColor::controlAccentColor();
+        let clear = NSColor::clearColor();
+        for (m, box_) in self.ivars().tiles.borrow().iter() {
+            if *m == mode {
+                box_.setBorderColor(&accent);
+                box_.setBorderWidth(3.0);
+            } else {
+                box_.setBorderColor(&clear);
+                box_.setBorderWidth(0.0);
+            }
+        }
     }
 
     fn apply_dock_visibility(&self) {
@@ -134,8 +176,8 @@ impl AppController {
         let mut slot = self.ivars().status_item.borrow_mut();
         match (show, slot.is_some()) {
             (true, false) => {
-                let item = NSStatusBar::systemStatusBar()
-                    .statusItemWithLength(NSVariableStatusItemLength);
+                let item =
+                    NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
                 if let Some(button) = item.button(mtm) {
                     button.setTitle(&NSString::from_str("⇥"));
                 }
@@ -154,38 +196,31 @@ impl AppController {
     fn build_menu(&self) -> Retained<NSMenu> {
         let mtm = self.ivars().mtm;
         let menu = NSMenu::new(mtm);
-
-        let prefs = menu_item(mtm, "Préférences…", sel!(showPreferences:), self);
-        menu.addItem(&prefs);
+        menu.addItem(&menu_item(mtm, "Préférences…", sel!(showPreferences:), self));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
-        let quit = menu_item(mtm, "Quitter Tabs", sel!(quitApp:), self);
-        menu.addItem(&quit);
+        menu.addItem(&menu_item(mtm, "Quitter Tabs", sel!(quitApp:), self));
         menu
     }
 
-    /// Affiche la fenêtre de préférences (la construit à la première demande).
+    /// Affiche la fenêtre de préférences (reconstruite à chaque ouverture pour
+    /// refléter l'état courant : sélection, statuts de permissions).
     pub fn show_preferences(&self) {
-        if self.ivars().prefs_window.borrow().is_none() {
-            let window = self.build_preferences_window();
-            *self.ivars().prefs_window.borrow_mut() = Some(window);
-        }
+        let window = self.build_preferences_window();
         let app = NSApplication::sharedApplication(self.ivars().mtm);
         app.activate();
-        if let Some(window) = self.ivars().prefs_window.borrow().as_ref() {
-            window.makeKeyAndOrderFront(None);
-        }
+        window.makeKeyAndOrderFront(None);
+        *self.ivars().prefs_window.borrow_mut() = Some(window);
     }
 
     fn build_preferences_window(&self) -> Retained<NSWindow> {
         let mtm = self.ivars().mtm;
         let settings = self.ivars().settings.borrow().clone();
+        self.ivars().tiles.borrow_mut().clear();
 
-        let width = 360.0;
-        let height = 400.0;
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
                 NSWindow::alloc(mtm),
-                NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width, height)),
+                NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(WIN_W, WIN_H)),
                 NSWindowStyleMask::Titled | NSWindowStyleMask::Closable,
                 NSBackingStoreType::Buffered,
                 false,
@@ -194,93 +229,218 @@ impl AppController {
         unsafe { window.setReleasedWhenClosed(false) };
         window.setTitle(&NSString::from_str("Préférences Tabs"));
         window.center();
-
         let content = window.contentView().expect("la fenêtre a une vue");
 
-        // En-tête : icône de l'application + titre.
+        // En-tête : logo + titre.
         if let Some(icon) = NSApplication::sharedApplication(mtm).applicationIconImage() {
-            let icon_view = NSImageView::imageViewWithImage(&icon, mtm);
-            icon_view.setFrame(NSRect::new(
-                NSPoint::new(24.0, height - 96.0),
-                NSSize::new(64.0, 64.0),
-            ));
-            content.addSubview(&icon_view);
+            let view = NSImageView::imageViewWithImage(&icon, mtm);
+            view.setFrame(rect(24.0, WIN_H - 82.0, 56.0, 56.0));
+            content.addSubview(&view);
         }
-        let title = make_label(mtm, "Tabs", NSRect::new(
-            NSPoint::new(100.0, height - 74.0),
-            NSSize::new(220.0, 28.0),
-        ));
+        let title = label(mtm, "Tabs", rect(92.0, WIN_H - 60.0, 300.0, 28.0));
         title.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
         content.addSubview(&title);
-        let subtitle = make_label(mtm, "Préférences", NSRect::new(
-            NSPoint::new(100.0, height - 96.0),
-            NSSize::new(220.0, 20.0),
+        content.addSubview(&label(
+            mtm,
+            "Commutateur de fenêtres",
+            rect(92.0, WIN_H - 80.0, 300.0, 18.0),
         ));
-        content.addSubview(&subtitle);
 
-        // Empilement vertical (origine bas-gauche).
-        let mut y = height - 150.0;
-        let label = make_label(mtm, "Mode d'affichage :", NSRect::new(
-            NSPoint::new(20.0, y),
-            NSSize::new(150.0, 20.0),
+        // Section « Aperçu des onglets ».
+        let mut y = WIN_H - 118.0;
+        content.addSubview(&section(mtm, "Aperçu des onglets", rect(24.0, y, 400.0, 18.0)));
+        y -= 122.0;
+        let tile_w = 132.0;
+        let modes = [
+            (DisplayMode::Thumbnails, "preview_thumbnails", "Miniatures", sel!(selectThumbnails:)),
+            (DisplayMode::AppIcons, "preview_appicons", "Icônes d'app", sel!(selectAppIcons:)),
+            (DisplayMode::Titles, "preview_titles", "Titres", sel!(selectTitles:)),
+        ];
+        for (i, (mode, image, label_text, action)) in modes.iter().enumerate() {
+            let x = 24.0 + (i as f64) * (tile_w + 11.0);
+            self.add_tile(
+                &content,
+                *mode,
+                image,
+                label_text,
+                *action,
+                rect(x, y, tile_w, 110.0),
+                *mode == settings.mode,
+            );
+        }
+
+        // Section « Déclencheur ».
+        y -= 44.0;
+        content.addSubview(&section(mtm, "Déclencheur", rect(24.0, y, 400.0, 18.0)));
+        y -= 34.0;
+        content.addSubview(&label(
+            mtm,
+            "Touche maintenue (puis Tab) :",
+            rect(24.0, y, 220.0, 22.0),
         ));
-        content.addSubview(&label);
-        let mode_btn = unsafe {
-            NSButton::buttonWithTitle_target_action(
-                &NSString::from_str(mode_label(settings.mode)),
-                Some(self),
-                Some(sel!(cycleMode:)),
-                mtm,
-            )
+        let trigger_idx = match settings.trigger {
+            TriggerModifier::Option => 0,
+            TriggerModifier::Command => 1,
+            TriggerModifier::Control => 2,
         };
-        mode_btn.setFrame(NSRect::new(NSPoint::new(180.0, y - 4.0), NSSize::new(160.0, 28.0)));
-        content.addSubview(&mode_btn);
-
-        y -= 48.0;
-        let dock = make_checkbox(mtm, "Afficher dans le Dock", sel!(toggleDock:), self,
-            settings.show_in_dock, NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 22.0)));
-        content.addSubview(&dock);
-
-        y -= 32.0;
-        let menubar = make_checkbox(mtm, "Afficher dans la barre des menus", sel!(toggleMenuBar:),
-            self, settings.show_in_menu_bar,
-            NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 22.0)));
-        content.addSubview(&menubar);
-
-        y -= 32.0;
-        let cmd_tab = make_checkbox(mtm, "Remplacer le Cmd-Tab du système",
-            sel!(toggleReplaceCmdTab:), self, settings.replace_cmd_tab,
-            NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 22.0)));
-        content.addSubview(&cmd_tab);
-
-        y -= 48.0;
-        let ax = make_button(mtm, "Autoriser l'Accessibilité", sel!(grantAccessibility:), self,
-            NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 28.0)));
-        content.addSubview(&ax);
+        let trigger_popup = popup(
+            mtm,
+            &["⌥ Option", "⌘ Command", "⌃ Control"],
+            trigger_idx,
+            sel!(triggerChanged:),
+            self,
+            rect(250.0, y - 2.0, 180.0, 26.0),
+        );
+        content.addSubview(&trigger_popup);
 
         y -= 36.0;
-        let screen = make_button(mtm, "Autoriser l'Enregistrement de l'écran",
-            sel!(grantScreenRecording:), self,
-            NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 28.0)));
-        content.addSubview(&screen);
+        content.addSubview(&checkbox(
+            mtm,
+            "Désactiver le Cmd-Tab du système",
+            sel!(toggleDisableCmdTab:),
+            self,
+            settings.disable_native_cmd_tab,
+            rect(24.0, y, 410.0, 22.0),
+        ));
 
+        // Section « Apparence dans le système ».
         y -= 44.0;
-        let quit = make_button(mtm, "Quitter Tabs", sel!(quitApp:), self,
-            NSRect::new(NSPoint::new(20.0, y), NSSize::new(320.0, 28.0)));
-        content.addSubview(&quit);
+        content.addSubview(&section(mtm, "Apparence dans le système", rect(24.0, y, 400.0, 18.0)));
+        y -= 32.0;
+        content.addSubview(&checkbox(
+            mtm,
+            "Afficher dans le Dock",
+            sel!(toggleDock:),
+            self,
+            settings.show_in_dock,
+            rect(24.0, y, 410.0, 22.0),
+        ));
+        y -= 30.0;
+        content.addSubview(&checkbox(
+            mtm,
+            "Afficher dans la barre des menus",
+            sel!(toggleMenuBar:),
+            self,
+            settings.show_in_menu_bar,
+            rect(24.0, y, 410.0, 22.0),
+        ));
+
+        // Section « Permissions ».
+        y -= 44.0;
+        content.addSubview(&section(mtm, "Permissions", rect(24.0, y, 400.0, 18.0)));
+        y -= 30.0;
+        self.add_permission_row(
+            &content,
+            "Accessibilité",
+            permissions::is_accessibility_granted(),
+            sel!(grantAccessibility:),
+            y,
+        );
+        y -= 30.0;
+        self.add_permission_row(
+            &content,
+            "Enregistrement de l'écran",
+            permissions::is_screen_recording_granted(),
+            sel!(grantScreenRecording:),
+            y,
+        );
+
+        // Pied : quitter.
+        content.addSubview(&button(
+            mtm,
+            "Quitter Tabs",
+            sel!(quitApp:),
+            self,
+            rect(24.0, 20.0, 410.0, 30.0),
+        ));
 
         window
     }
+
+    /// Ajoute une tuile d'aperçu sélectionnable (image + libellé) et enregistre
+    /// sa boîte de surbrillance.
+    fn add_tile(
+        &self,
+        content: &NSView,
+        mode: DisplayMode,
+        image_name: &str,
+        title: &str,
+        action: Sel,
+        frame: NSRect,
+        selected: bool,
+    ) {
+        let mtm = self.ivars().mtm;
+
+        // Boîte de surbrillance (contour) derrière la tuile.
+        let box_ = make_box(mtm, frame, 14.0);
+        if selected {
+            box_.setBorderColor(&NSColor::controlAccentColor());
+            box_.setBorderWidth(3.0);
+        }
+        content.addSubview(&box_);
+
+        // Bouton-image cliquable (l'aperçu).
+        let target: &AnyObject = self;
+        let button = unsafe {
+            NSButton::buttonWithTitle_target_action(
+                &NSString::from_str(""),
+                Some(target),
+                Some(action),
+                mtm,
+            )
+        };
+        button.setBordered(false);
+        button.setImagePosition(NSCellImagePosition::ImageOnly);
+        button.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
+        if let Some(image) = NSImage::imageNamed(&NSString::from_str(image_name)) {
+            button.setImage(Some(&image));
+        }
+        button.setFrame(rect(
+            frame.origin.x + 8.0,
+            frame.origin.y + 26.0,
+            frame.size.width - 16.0,
+            76.0,
+        ));
+        content.addSubview(&button);
+
+        let lbl = label(
+            mtm,
+            title,
+            rect(frame.origin.x, frame.origin.y + 4.0, frame.size.width, 18.0),
+        );
+        lbl.setAlignment(objc2_app_kit::NSTextAlignment::Center);
+        content.addSubview(&lbl);
+
+        self.ivars().tiles.borrow_mut().push((mode, box_));
+    }
+
+    /// Ajoute une ligne de permission : nom, statut, et bouton « Autoriser »
+    /// uniquement si la permission n'est pas déjà accordée.
+    fn add_permission_row(
+        &self,
+        content: &NSView,
+        name: &str,
+        granted: bool,
+        action: Sel,
+        y: f64,
+    ) {
+        let mtm = self.ivars().mtm;
+        let status = if granted {
+            format!("✅ {name} — accordée")
+        } else {
+            format!("⚠️ {name} — non accordée")
+        };
+        content.addSubview(&label(mtm, &status, rect(24.0, y, 300.0, 22.0)));
+        if !granted {
+            content.addSubview(&button(mtm, "Autoriser", action, self, rect(330.0, y - 4.0, 104.0, 26.0)));
+        }
+    }
 }
 
-/// Libellé lisible d'un mode d'affichage.
-fn mode_label(mode: crate::ui::DisplayMode) -> &'static str {
-    use crate::ui::DisplayMode::*;
-    match mode {
-        Thumbnails => "Miniatures",
-        AppIcons => "Icônes d'app",
-        Titles => "Titres",
-    }
+// ----- Helpers (création de vues / valeurs) -------------------------------
+
+fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {
+    NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
 }
 
 fn checkbox_is_on(sender: Option<&AnyObject>) -> bool {
@@ -290,35 +450,55 @@ fn checkbox_is_on(sender: Option<&AnyObject>) -> bool {
         .unwrap_or(false)
 }
 
-fn menu_item(
-    mtm: MainThreadMarker,
-    title: &str,
-    action: objc2::runtime::Sel,
-    target: &AppController,
-) -> Retained<NSMenuItem> {
-    let item = unsafe {
-        NSMenuItem::initWithTitle_action_keyEquivalent(
-            NSMenuItem::alloc(mtm),
-            &NSString::from_str(title),
-            Some(action),
-            &NSString::from_str(""),
-        )
-    };
-    let target: &AnyObject = target;
-    unsafe { item.setTarget(Some(target)) };
-    item
-}
-
-fn make_label(mtm: MainThreadMarker, text: &str, frame: NSRect) -> Retained<NSTextField> {
+fn label(mtm: MainThreadMarker, text: &str, frame: NSRect) -> Retained<NSTextField> {
     let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
     label.setFrame(frame);
     label
 }
 
-fn make_checkbox(
+fn section(mtm: MainThreadMarker, text: &str, frame: NSRect) -> Retained<NSTextField> {
+    let label = label(mtm, text, frame);
+    label.setFont(Some(&NSFont::boldSystemFontOfSize(13.0)));
+    label.setTextColor(Some(&NSColor::secondaryLabelColor()));
+    label
+}
+
+fn make_box(mtm: MainThreadMarker, frame: NSRect, corner_radius: f64) -> Retained<NSBox> {
+    // SAFETY: init de NSBox.
+    let boxed: Retained<NSBox> = unsafe { msg_send![NSBox::alloc(mtm), init] };
+    boxed.setBoxType(NSBoxType::Custom);
+    boxed.setTitlePosition(NSTitlePosition::NoTitle);
+    boxed.setBorderWidth(0.0);
+    boxed.setFillColor(&NSColor::clearColor());
+    boxed.setCornerRadius(corner_radius);
+    boxed.setFrame(frame);
+    boxed
+}
+
+fn button(
     mtm: MainThreadMarker,
     title: &str,
-    action: objc2::runtime::Sel,
+    action: Sel,
+    target: &AppController,
+    frame: NSRect,
+) -> Retained<NSButton> {
+    let target_obj: &AnyObject = target;
+    let button = unsafe {
+        NSButton::buttonWithTitle_target_action(
+            &NSString::from_str(title),
+            Some(target_obj),
+            Some(action),
+            mtm,
+        )
+    };
+    button.setFrame(frame);
+    button
+}
+
+fn checkbox(
+    mtm: MainThreadMarker,
+    title: &str,
+    action: Sel,
     target: &AppController,
     on: bool,
     frame: NSRect,
@@ -339,22 +519,42 @@ fn make_checkbox(
     button
 }
 
-fn make_button(
+fn popup(
     mtm: MainThreadMarker,
-    title: &str,
-    action: objc2::runtime::Sel,
+    items: &[&str],
+    selected: isize,
+    action: Sel,
     target: &AppController,
     frame: NSRect,
-) -> Retained<NSButton> {
+) -> Retained<NSPopUpButton> {
+    let popup = NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(mtm), frame, false);
+    for item in items {
+        popup.addItemWithTitle(&NSString::from_str(item));
+    }
+    popup.selectItemAtIndex(selected);
     let target_obj: &AnyObject = target;
-    let button = unsafe {
-        NSButton::buttonWithTitle_target_action(
+    unsafe {
+        popup.setTarget(Some(target_obj));
+        popup.setAction(Some(action));
+    }
+    popup
+}
+
+fn menu_item(
+    mtm: MainThreadMarker,
+    title: &str,
+    action: Sel,
+    target: &AppController,
+) -> Retained<NSMenuItem> {
+    let item = unsafe {
+        NSMenuItem::initWithTitle_action_keyEquivalent(
+            NSMenuItem::alloc(mtm),
             &NSString::from_str(title),
-            Some(target_obj),
             Some(action),
-            mtm,
+            &NSString::from_str(""),
         )
     };
-    button.setFrame(frame);
-    button
+    let target_obj: &AnyObject = target;
+    unsafe { item.setTarget(Some(target_obj)) };
+    item
 }

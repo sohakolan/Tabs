@@ -12,6 +12,7 @@ mod state;
 
 pub use state::{Action, Input, Switcher};
 
+use crate::config::TriggerModifier;
 use crate::ui::{DisplayMode, Overlay};
 use crate::windows::{self, Window};
 
@@ -249,17 +250,22 @@ fn quit() {
     }
 }
 
-/// Active/désactive le remplacement du Cmd-Tab système : bascule le modificateur
-/// de déclenchement (Command vs Option) et (dés)active le commutateur natif.
-pub fn set_replace_cmd_tab(on: bool) {
-    STATE.with(|s| {
-        s.borrow_mut().trigger_flag = if on {
-            CGEventFlags::MaskCommand
-        } else {
-            CGEventFlags::MaskAlternate
-        };
-    });
-    crate::system::set_native_cmd_tab_enabled(!on);
+/// Définit le modificateur de déclenchement (maintenu pendant le cycle).
+pub fn set_trigger_modifier(modifier: TriggerModifier) {
+    STATE.with(|s| s.borrow_mut().trigger_flag = modifier_flag(modifier));
+}
+
+/// (Dés)active le commutateur d'applications natif de macOS.
+pub fn set_disable_native_cmd_tab(disable: bool) {
+    crate::system::set_native_cmd_tab_enabled(!disable);
+}
+
+fn modifier_flag(modifier: TriggerModifier) -> CGEventFlags {
+    match modifier {
+        TriggerModifier::Option => CGEventFlags::MaskAlternate,
+        TriggerModifier::Command => CGEventFlags::MaskCommand,
+        TriggerModifier::Control => CGEventFlags::MaskControl,
+    }
 }
 
 /// Ouvre les préférences (touche `,`) : ferme d'abord l'overlay.

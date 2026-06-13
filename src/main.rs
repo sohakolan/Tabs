@@ -94,8 +94,9 @@ fn main() {
         settings.mode,
         Box::new(move || prefs_controller.show_preferences()),
     );
-    // Applique le remplacement éventuel du Cmd-Tab système.
-    hotkey::set_replace_cmd_tab(settings.replace_cmd_tab);
+    // Applique le modificateur de déclenchement et l'état du Cmd-Tab système.
+    hotkey::set_trigger_modifier(settings.trigger);
+    hotkey::set_disable_native_cmd_tab(settings.disable_native_cmd_tab);
 
     // Au tout premier lancement, l'app est invisible : on ouvre les préférences
     // pour que l'utilisateur sache qu'elle tourne et puisse la configurer. On

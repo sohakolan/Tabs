@@ -1,0 +1,21 @@
+<svg width="260" height="150" viewBox="0 0 260 150" xmlns="http://www.w3.org/2000/svg">
+  <rect x="2" y="2" width="256" height="146" rx="20" fill="#242233" opacity="0.96"/>
+  <!-- trois miniatures de fenêtres -->
+  <g>
+    <rect x="22" y="40" width="64" height="70" rx="8" fill="#E9EBF7"/>
+    <rect x="28" y="48" width="40" height="5" rx="2.5" fill="#B9BEE0"/>
+    <rect x="28" y="60" width="30" height="5" rx="2.5" fill="#CBCFEC"/>
+
+    <rect x="98" y="40" width="64" height="70" rx="8" fill="#FFFFFF" stroke="#7C6BFF" stroke-width="3"/>
+    <rect x="104" y="48" width="40" height="5" rx="2.5" fill="#A9AEDC"/>
+    <rect x="104" y="60" width="30" height="5" rx="2.5" fill="#C2C7E8"/>
+
+    <rect x="174" y="40" width="64" height="70" rx="8" fill="#E9EBF7"/>
+    <rect x="180" y="48" width="40" height="5" rx="2.5" fill="#B9BEE0"/>
+    <rect x="180" y="60" width="30" height="5" rx="2.5" fill="#CBCFEC"/>
+  </g>
+  <!-- libellés sous les miniatures -->
+  <rect x="34" y="120" width="40" height="6" rx="3" fill="#6E7290"/>
+  <rect x="110" y="120" width="40" height="6" rx="3" fill="#9AA0C8"/>
+  <rect x="186" y="120" width="40" height="6" rx="3" fill="#6E7290"/>
+</svg>
