@@ -560,7 +560,7 @@ impl AppController {
         pane.addSubview(&title);
         for (i, (text, secondary)) in [
             (t.about_tagline, true),
-            ("Version 0.1.0", false),
+            (concat!("Version ", env!("CARGO_PKG_VERSION")), false),
             (t.about_free, true),
         ]
         .iter()
