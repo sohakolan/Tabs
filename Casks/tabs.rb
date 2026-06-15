@@ -4,7 +4,7 @@ cask "tabs" do
 
   url "https://github.com/sohakolan/Tabs/releases/download/v#{version}/Tabs-arm64.dmg"
   name "Tabs"
-  desc "Commutateur de fenêtres léger et rapide"
+  desc "Lightweight, fast window switcher"
   homepage "https://github.com/sohakolan/Tabs"
 
   depends_on macos: :sonoma
@@ -13,10 +13,8 @@ cask "tabs" do
   app "Tabs.app"
 
   caveats <<~EOS
-    Tabs n'est pas notarisée par Apple. Si macOS bloque l'app au lancement :
+    Tabs is not notarized by Apple, so macOS blocks it on first launch.
+    Clear the quarantine flag, then open it:
       xattr -dr com.apple.quarantine "/Applications/Tabs.app"
-
-    Pour éviter la quarantaine dès l'installation :
-      brew install --cask --no-quarantine tabs
   EOS
 end

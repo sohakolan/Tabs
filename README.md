@@ -1,85 +1,91 @@
 # Tabs
 
-> *Parce qu'on ne devrait pas avoir à payer pour une fonction qui devrait être native.*
+> *Because you shouldn't have to pay for a feature that should be native.*
 
-Un commutateur de fenêtres pour macOS, écrit en **Rust** — libre, léger et rapide.
+A lightweight, fast window switcher for macOS — written in **Rust**, free and open source.
 
 ## Installation
 
-### Télécharger (recommandé)
+### Homebrew
 
-1. Récupère **`Tabs-arm64.dmg`** sur la page
-   [Releases](https://github.com/sohakolan/Tabs/releases).
-2. Ouvre le DMG et glisse **Tabs** dans **Applications**.
-3. L'app n'est pas notarisée par Apple (ça nécessite un compte développeur payant), donc
-   macOS la bloque au premier lancement. Lève la quarantaine puis ouvre-la :
+```sh
+brew tap sohakolan/tabs https://github.com/sohakolan/Tabs
+brew install --cask sohakolan/tabs/tabs
+xattr -dr com.apple.quarantine /Applications/Tabs.app   # Tabs isn't notarized by Apple
+```
+
+### Download
+
+1. Grab **`Tabs-arm64.dmg`** from the [Releases](https://github.com/sohakolan/Tabs/releases)
+   page.
+2. Open the DMG and drag **Tabs** into **Applications**.
+3. Tabs isn't notarized by Apple (that needs a paid developer account), so macOS blocks it on
+   first launch. Clear the quarantine flag, then open it:
 
    ```sh
    xattr -dr com.apple.quarantine /Applications/Tabs.app
    open /Applications/Tabs.app
    ```
 
-> Compatibilité : build **Apple Silicon (arm64)**, **macOS 14+** (Sonoma).
+> Built for **Apple Silicon (arm64)**, **macOS 14+** (Sonoma).
 
-### Construire depuis les sources
+### Build from source
 
-Prérequis : **Rust** stable et **macOS 14+**.
+Requirements: **Rust** (stable) and **macOS 14+**.
 
 ```sh
-make run     # compile, assemble dist/Tabs.app et le lance
+make run     # compiles, assembles dist/Tabs.app and launches it
 ```
 
 ### Permissions
 
-Au premier lancement, autorise « Tabs » dans **Réglages Système › Confidentialité et
-sécurité** :
+On first launch, allow "Tabs" in **System Settings › Privacy & Security**:
 
-- **Accessibilité** (obligatoire) — observer le clavier et lister/activer les fenêtres ;
-- **Enregistrement de l'écran** (optionnel) — affiche les miniatures (sinon repli sur les
-  icônes d'application).
+- **Accessibility** (required) — observe the keyboard and list/activate windows;
+- **Screen Recording** (optional) — shows window thumbnails (otherwise falls back to app
+  icons).
 
-Dans le volet **Permissions** des préférences : « Rafraîchir » réévalue les statuts (et
-active le raccourci dès que l'Accessibilité est accordée, sans relancer) ; « Relancer Tabs »
-applique l'enregistrement d'écran (cette permission n'est prise en compte qu'au redémarrage).
+In the preferences **Permissions** tab, "Refresh" re-checks the statuses (and enables the
+shortcut as soon as Accessibility is granted, without relaunching); "Relaunch Tabs" applies
+Screen Recording (this permission only takes effect after a restart).
 
-## Pourquoi
+## Why
 
-macOS n'offre pas de véritable commutateur de fenêtres. **Tabs** comble ce manque —
-gratuitement et sous licence **GPL-3.0** — avec pour objectifs un démarrage à froid quasi
-instantané, une faible empreinte mémoire (pas de runtime Swift) et des miniatures
-*zéro-copie* via ScreenCaptureKit.
+macOS has no real window switcher. **Tabs** fills that gap — for free and under the
+**GPL-3.0** license — aiming for a near-instant cold start, a small memory footprint (no Swift
+runtime) and *zero-copy* thumbnails via ScreenCaptureKit.
 
-> Le rendu passe nécessairement par Core Animation / le compositeur du système : Tabs ne
-> cherche pas à « battre AppKit » sur le rendu pur, mais à minimiser tout le reste (démarrage,
-> mémoire, énumération des fenêtres, capture des miniatures à la demande).
+> Rendering necessarily goes through Core Animation / the system compositor: Tabs doesn't try
+> to "beat AppKit" on raw rendering, but to minimize everything else (startup, memory, window
+> enumeration, on-demand thumbnail capture).
 
-## Pile technique
+## Tech stack
 
-- **UI** : AppKit natif via [`objc2`](https://github.com/madsmtm/objc2) — `NSPanel`
-  non-activant + Core Animation.
-- **Fenêtres** : API d'Accessibilité (`AXUIElement`) pour l'énumération et l'activation ;
-  `CGWindowList` pour l'ordre z et les titres.
-- **Déclencheur** : `CGEventTap` (suivi des modificateurs, commit au relâchement).
-- **Miniatures** : ScreenCaptureKit (macOS 14+), rendu *zéro-copie* via IOSurface.
-- **Spaces / focus fiable** : API privées SkyLight/CGS (`_AXUIElementGetWindow`,
+- **UI**: native AppKit via [`objc2`](https://github.com/madsmtm/objc2) — non-activating
+  `NSPanel` + Core Animation.
+- **Windows**: Accessibility API (`AXUIElement`) for enumeration and activation; `CGWindowList`
+  for z-order and titles.
+- **Trigger**: `CGEventTap` (modifier tracking, commit on release).
+- **Thumbnails**: ScreenCaptureKit (macOS 14+), *zero-copy* rendering via IOSurface.
+- **Spaces / reliable focus**: private SkyLight/CGS APIs (`_AXUIElementGetWindow`,
   `_SLPSSetFrontProcessWithOptions`, …).
 
-## Développement
+## Development
 
-Pour contribuer ou itérer sur le code :
+To contribute or iterate on the code:
 
 ```sh
-make signing-setup   # une seule fois : identité de signature stable
-make bundle          # compile en release et assemble dist/Tabs.app
-make dmg             # assemble dist/Tabs-<arch>.dmg (fichier d'installation pour une release)
-cargo run            # lance le binaire nu (utile pour les logs ; l'app reste un agent)
+make signing-setup   # once: stable signing identity
+make bundle          # release build + assembles dist/Tabs.app
+make dmg             # assembles dist/Tabs-<arch>.dmg (installer for a release)
+cargo run            # runs the bare binary (handy for logs; the app stays an agent)
 ```
 
-> **Pourquoi `make signing-setup` ?** En signature ad-hoc, l'identité de code change à chaque
-> build et macOS (TCC) réoublie les permissions, qu'il faut alors ré-accorder après chaque
-> rebuild. Une identité de signature stable les fait persister — utile quand on recompile
-> souvent. Un simple usage (un seul `make run`) n'en a pas besoin.
+> **Why `make signing-setup`?** With ad-hoc signing, the code identity changes on every build
+> and macOS (TCC) forgets the granted permissions, forcing you to re-grant them after each
+> rebuild. A stable signing identity keeps them — useful when recompiling often. A plain
+> install (a single `make run`) doesn't need it.
 
-## Licence
+## License
 
 [GPL-3.0-or-later](LICENSE).
