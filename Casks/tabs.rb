@@ -4,10 +4,10 @@ cask "tabs" do
 
   url "https://github.com/sohakolan/Tabs/releases/download/v#{version}/Tabs-arm64.dmg"
   name "Tabs"
-  desc "Commutateur de fenêtres pour macOS"
+  desc "Commutateur de fenêtres léger et rapide"
   homepage "https://github.com/sohakolan/Tabs"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
   depends_on arch: :arm64
 
   app "Tabs.app"
