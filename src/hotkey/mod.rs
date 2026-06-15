@@ -78,9 +78,12 @@ thread_local! {
     });
 }
 
-/// Installe le tap clavier sur la run loop courante (à appeler depuis le thread
-/// principal, avant `NSApplication::run`). Retourne `false` en cas d'échec
-/// (typiquement permission d'Accessibilité manquante).
+/// Prépare le sélecteur (overlay + rappels) puis tente d'installer le tap
+/// clavier. À appeler une fois depuis le thread principal, avant
+/// `NSApplication::run`. Retourne `false` si le tap n'a pas pu être créé
+/// (typiquement permission d'Accessibilité manquante) — dans ce cas l'overlay
+/// est tout de même prêt et [`ensure_tap_installed`] activera le tap dès que la
+/// permission sera accordée, sans relancer l'application.
 pub fn install(initial_mode: DisplayMode, on_open_prefs: Box<dyn Fn()>) -> bool {
     // L'overlay vit sur le thread principal (objets AppKit non-Send). On lui
     // confie les rappels souris, branchés sur la même machine à états.
@@ -92,6 +95,29 @@ pub fn install(initial_mode: DisplayMode, on_open_prefs: Box<dyn Fn()>) -> bool 
         st.mode = initial_mode;
         st.on_open_prefs = on_open_prefs;
     });
+
+    if ensure_tap_installed() {
+        true
+    } else {
+        eprintln!(
+            "[Tabs] Tap clavier non installé (permission d'Accessibilité manquante). \
+             Il s'activera automatiquement dès qu'elle sera accordée."
+        );
+        false
+    }
+}
+
+/// (Re)crée le tap clavier sur la run loop courante si nécessaire.
+///
+/// Idempotent : si le tap est déjà actif, retourne `true` sans rien faire.
+/// `CGEventTapCreate` échoue tant que l'Accessibilité n'est pas accordée ; on
+/// peut donc rappeler cette fonction après l'octroi de la permission (p. ex. au
+/// retour des Réglages Système) pour activer Option-Tab **sans relancer** Tabs.
+/// Retourne `true` si le tap est actif à la sortie.
+pub fn ensure_tap_installed() -> bool {
+    if STATE.with(|s| s.borrow().port.is_some()) {
+        return true;
+    }
 
     // SAFETY: signature conforme à CGEventTapCallBack ; `user_info` non utilisé
     // (l'état est dans un thread_local). `CGEventTapCreate` est déprécié au
@@ -109,8 +135,9 @@ pub fn install(initial_mode: DisplayMode, on_open_prefs: Box<dyn Fn()>) -> bool 
         )
     };
 
+    // Échec silencieux : l'Accessibilité n'est pas (encore) accordée. On
+    // réessaiera plus tard ; inutile de polluer les logs à chaque tentative.
     let Some(port) = port else {
-        eprintln!("[Tabs] Échec de création du tap clavier (permission d'Accessibilité ?).");
         return false;
     };
 

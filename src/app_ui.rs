@@ -61,6 +61,16 @@ define_class!(
             std::process::exit(0);
         }
 
+        #[unsafe(method(relaunchApp:))]
+        fn action_relaunch(&self, _sender: Option<&AnyObject>) {
+            // Relance Tabs : l'enregistrement d'écran (miniatures) n'est pris en
+            // compte par le process qu'après un redémarrage. On restaure le
+            // Cmd-Tab natif, on lance une instance fraîche puis on quitte.
+            crate::system::set_native_cmd_tab_enabled(true);
+            spawn_replacement();
+            std::process::exit(0);
+        }
+
         #[unsafe(method(selectThumbnails:))]
         fn action_mode_thumbnails(&self, _sender: Option<&AnyObject>) {
             self.select_mode(DisplayMode::Thumbnails);
@@ -127,6 +137,8 @@ define_class!(
         #[unsafe(method(grantAccessibility:))]
         fn action_grant_accessibility(&self, _sender: Option<&AnyObject>) {
             permissions::ensure_accessibility();
+            // Si la permission vient d'être accordée, active le tap sans relance.
+            crate::hotkey::ensure_tap_installed();
         }
 
         #[unsafe(method(grantScreenRecording:))]
@@ -152,9 +164,12 @@ define_class!(
         }
 
         // Au retour au premier plan (ex. après avoir accordé une permission dans
-        // Réglages Système), rafraîchit les statuts si les préférences sont ouvertes.
+        // Réglages Système) : tente d'activer le tap clavier maintenant que
+        // l'Accessibilité est peut-être accordée (évite un relancement manuel),
+        // puis rafraîchit les statuts si les préférences sont ouvertes.
         #[unsafe(method(applicationDidBecomeActive:))]
         fn application_did_become_active(&self, _notification: &NSNotification) {
+            crate::hotkey::ensure_tap_installed();
             self.refresh_preferences_if_open();
         }
     }
@@ -430,15 +445,24 @@ impl AppController {
         self.add_permission_row(&pane, "Accessibilité",
             permissions::is_accessibility_granted(), sel!(grantAccessibility:), y);
         y -= 34.0;
+        let screen_granted = permissions::is_screen_recording_granted();
         self.add_permission_row(&pane, "Enregistrement de l'écran",
-            permissions::is_screen_recording_granted(), sel!(grantScreenRecording:), y);
+            screen_granted, sel!(grantScreenRecording:), y);
         y -= 40.0;
         let note = label(mtm,
-            "L'Accessibilité est requise. L'enregistrement d'écran active les miniatures.",
-            rect(20.0, y, PANE_W - 40.0, 18.0));
+            "L'Accessibilité est requise et s'active immédiatement. \
+             L'enregistrement d'écran active les miniatures après un relancement.",
+            rect(20.0, y, PANE_W - 40.0, 34.0));
         note.setFont(Some(&NSFont::systemFontOfSize(11.0)));
         note.setTextColor(Some(&NSColor::secondaryLabelColor()));
         pane.addSubview(&note);
+        // Une fois l'enregistrement d'écran accordé, un relancement est requis
+        // pour que le process en bénéficie (limite macOS) : on l'offre en un clic.
+        if screen_granted {
+            y -= 34.0;
+            pane.addSubview(&button(mtm, "Relancer Tabs", sel!(relaunchApp:), self,
+                rect(20.0, y, 140.0, 26.0)));
+        }
         pane
     }
 
@@ -553,6 +577,26 @@ impl AppController {
 }
 
 // ----- Helpers (création de vues / valeurs) -------------------------------
+
+/// Lance une nouvelle instance de Tabs avant que l'instance courante ne quitte.
+///
+/// Si l'exécutable est dans un bundle `.app`, on relance via LaunchServices
+/// (`open -n`, identité de code et permissions correctes) ; sinon (binaire de
+/// dev nu) on ré-exécute directement le binaire.
+fn spawn_replacement() {
+    use std::process::Command;
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let bundle = exe
+        .ancestors()
+        .find(|p| p.extension().is_some_and(|e| e == "app"));
+    if let Some(app) = bundle {
+        let _ = Command::new("/usr/bin/open").arg("-n").arg(app).spawn();
+    } else {
+        let _ = Command::new(exe).spawn();
+    }
+}
 
 fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {
     NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
