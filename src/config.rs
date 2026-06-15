@@ -26,6 +26,19 @@ impl Default for TriggerModifier {
     }
 }
 
+/// Langue de l'interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Language {
+    Fr,
+    En,
+}
+
+impl Default for Language {
+    fn default() -> Self {
+        Self::Fr
+    }
+}
+
 /// Réglages de l'utilisateur.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -42,6 +55,8 @@ pub struct Settings {
     pub show_in_menu_bar: bool,
     /// Lancer Tabs automatiquement à l'ouverture de session.
     pub launch_at_login: bool,
+    /// Langue de l'interface (français par défaut).
+    pub language: Language,
 }
 
 impl Default for Settings {
@@ -54,6 +69,7 @@ impl Default for Settings {
             show_in_dock: false,
             show_in_menu_bar: true,
             launch_at_login: false,
+            language: Language::Fr,
         }
     }
 }

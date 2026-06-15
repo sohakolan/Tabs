@@ -21,7 +21,8 @@ use objc2_foundation::{
     MainThreadMarker, NSNotification, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
 };
 
-use crate::config::{self, Settings, TriggerModifier};
+use crate::config::{self, Language, Settings, TriggerModifier};
+use crate::i18n::{self, Strings};
 use crate::ui::DisplayMode;
 use crate::{hotkey, permissions};
 
@@ -87,6 +88,22 @@ define_class!(
         #[unsafe(method(selectTitles:))]
         fn action_mode_titles(&self, _sender: Option<&AnyObject>) {
             self.select_mode(DisplayMode::Titles);
+        }
+
+        #[unsafe(method(languageChanged:))]
+        fn action_language_changed(&self, sender: Option<&AnyObject>) {
+            let idx = sender
+                .and_then(|s| s.downcast_ref::<NSPopUpButton>())
+                .map(|p| p.indexOfSelectedItem())
+                .unwrap_or(0);
+            let lang = if idx == 1 { Language::En } else { Language::Fr };
+            self.ivars().settings.borrow_mut().language = lang;
+            self.save();
+            // Réapplique la langue partout : menu barre des menus, menu principal
+            // (Cmd-Q) et fenêtre de préférences.
+            self.refresh_status_menu();
+            self.install_main_menu();
+            self.present_preferences();
         }
 
         #[unsafe(method(triggerChanged:))]
@@ -210,6 +227,19 @@ impl AppController {
         config::save(&self.ivars().settings.borrow());
     }
 
+    /// Libellés de l'UI dans la langue courante.
+    fn t(&self) -> Strings {
+        i18n::strings(self.ivars().settings.borrow().language)
+    }
+
+    /// Reconstruit le menu de la barre des menus (s'il est affiché) pour
+    /// refléter la langue courante.
+    fn refresh_status_menu(&self) {
+        if let Some(item) = self.ivars().status_item.borrow().as_ref() {
+            item.setMenu(Some(&self.build_menu()));
+        }
+    }
+
     fn select_mode(&self, mode: DisplayMode) {
         self.ivars().settings.borrow_mut().mode = mode;
         self.save();
@@ -253,10 +283,11 @@ impl AppController {
 
     fn build_menu(&self) -> Retained<NSMenu> {
         let mtm = self.ivars().mtm;
+        let t = self.t();
         let menu = NSMenu::new(mtm);
-        menu.addItem(&menu_item(mtm, "Préférences…", sel!(showPreferences:), self));
+        menu.addItem(&menu_item(mtm, t.menu_preferences, sel!(showPreferences:), self));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
-        menu.addItem(&menu_item(mtm, "Quitter Tabs", sel!(quitApp:), self));
+        menu.addItem(&menu_item(mtm, t.quit_tabs, sel!(quitApp:), self));
         menu
     }
 
@@ -272,7 +303,7 @@ impl AppController {
         let quit = unsafe {
             NSMenuItem::initWithTitle_action_keyEquivalent(
                 NSMenuItem::alloc(mtm),
-                &NSString::from_str("Quitter Tabs"),
+                &NSString::from_str(self.t().quit_tabs),
                 Some(sel!(quitApp:)),
                 &NSString::from_str("q"),
             )
@@ -341,8 +372,9 @@ impl AppController {
                 false,
             )
         };
+        let t = self.t();
         unsafe { window.setReleasedWhenClosed(false) };
-        window.setTitle(&NSString::from_str("Préférences Tabs"));
+        window.setTitle(&NSString::from_str(t.prefs_title));
         window.center();
         let content = window.contentView().expect("la fenêtre a une vue");
 
@@ -355,7 +387,7 @@ impl AppController {
         let title = label(mtm, "Tabs", rect(66.0, WIN_H - 44.0, 300.0, 24.0));
         title.setFont(Some(&NSFont::boldSystemFontOfSize(18.0)));
         content.addSubview(&title);
-        let sub = label(mtm, "Commutateur de fenêtres", rect(66.0, WIN_H - 62.0, 320.0, 16.0));
+        let sub = label(mtm, t.subtitle, rect(66.0, WIN_H - 62.0, 320.0, 16.0));
         sub.setFont(Some(&NSFont::systemFontOfSize(11.0)));
         sub.setTextColor(Some(&NSColor::secondaryLabelColor()));
         content.addSubview(&sub);
@@ -369,11 +401,11 @@ impl AppController {
             NSAutoresizingMaskOptions::ViewWidthSizable
                 | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
-        self.add_pane(&tabs, "Général", &self.build_general_pane(&settings));
-        self.add_pane(&tabs, "Apparence", &self.build_appearance_pane(&settings));
-        self.add_pane(&tabs, "Raccourci", &self.build_shortcut_pane(&settings));
-        self.add_pane(&tabs, "Permissions", &self.build_permissions_pane());
-        self.add_pane(&tabs, "À propos", &self.build_about_pane());
+        self.add_pane(&tabs, t.tab_general, &self.build_general_pane(&settings));
+        self.add_pane(&tabs, t.tab_appearance, &self.build_appearance_pane(&settings));
+        self.add_pane(&tabs, t.tab_shortcut, &self.build_shortcut_pane(&settings));
+        self.add_pane(&tabs, t.tab_permissions, &self.build_permissions_pane());
+        self.add_pane(&tabs, t.tab_about, &self.build_about_pane());
         // Restaure l'onglet demandé (borné au nombre d'onglets).
         let count = tabs.numberOfTabViewItems();
         if select_tab > 0 && select_tab < count {
@@ -392,38 +424,56 @@ impl AppController {
         tabs.addTabViewItem(&item);
     }
 
-    /// Volet « Général » : visibilité de l'application.
+    /// Volet « Général » : visibilité, langue, et bouton quitter.
     fn build_general_pane(&self, s: &Settings) -> Retained<NSView> {
         let mtm = self.ivars().mtm;
+        let t = self.t();
         let pane = make_pane(mtm);
         let mut y = PANE_H - 40.0;
-        pane.addSubview(&section(mtm, "Visibilité", rect(20.0, y, PANE_W - 40.0, 18.0)));
+        pane.addSubview(&section(mtm, t.visibility, rect(20.0, y, PANE_W - 40.0, 18.0)));
         y -= 36.0;
-        pane.addSubview(&checkbox(mtm, "Afficher dans le Dock", sel!(toggleDock:), self,
+        pane.addSubview(&checkbox(mtm, t.show_in_dock, sel!(toggleDock:), self,
             s.show_in_dock, rect(20.0, y, PANE_W - 40.0, 22.0)));
         y -= 30.0;
-        pane.addSubview(&checkbox(mtm, "Afficher dans la barre des menus", sel!(toggleMenuBar:),
+        pane.addSubview(&checkbox(mtm, t.show_in_menu_bar, sel!(toggleMenuBar:),
             self, s.show_in_menu_bar, rect(20.0, y, PANE_W - 40.0, 22.0)));
         y -= 30.0;
-        pane.addSubview(&checkbox(mtm, "Lancer au démarrage", sel!(toggleLaunchAtLogin:), self,
+        pane.addSubview(&checkbox(mtm, t.launch_at_login, sel!(toggleLaunchAtLogin:), self,
             s.launch_at_login, rect(20.0, y, PANE_W - 40.0, 22.0)));
+
+        // Langue de l'interface.
+        y -= 44.0;
+        pane.addSubview(&section(mtm, t.language, rect(20.0, y, PANE_W - 40.0, 18.0)));
+        y -= 34.0;
+        let lang_idx = match s.language {
+            Language::Fr => 0,
+            Language::En => 1,
+        };
+        pane.addSubview(&popup(mtm, &["Français", "English"], lang_idx,
+            sel!(languageChanged:), self, rect(20.0, y - 2.0, 180.0, 26.0)));
+
+        // Quitter l'application.
+        y -= 50.0;
+        pane.addSubview(&button(mtm, t.quit_tabs, sel!(quitApp:), self,
+            rect(20.0, y, 140.0, 30.0)));
         pane
     }
 
     /// Volet « Apparence » : mode d'affichage avec aperçus.
     fn build_appearance_pane(&self, s: &Settings) -> Retained<NSView> {
         let mtm = self.ivars().mtm;
+        let t = self.t();
         let pane = make_pane(mtm);
-        pane.addSubview(&section(mtm, "Mode d'affichage", rect(20.0, PANE_H - 40.0, PANE_W - 40.0, 18.0)));
+        pane.addSubview(&section(mtm, t.display_mode, rect(20.0, PANE_H - 40.0, PANE_W - 40.0, 18.0)));
         let tile_w = 140.0;
         let gap = 12.0;
         let total = 3.0 * tile_w + 2.0 * gap;
         let start = (PANE_W - total) / 2.0;
         let ty = PANE_H - 40.0 - 134.0;
         let modes = [
-            (DisplayMode::Thumbnails, "preview_thumbnails", "Miniatures", sel!(selectThumbnails:)),
-            (DisplayMode::AppIcons, "preview_appicons", "Icônes d'app", sel!(selectAppIcons:)),
-            (DisplayMode::Titles, "preview_titles", "Titres", sel!(selectTitles:)),
+            (DisplayMode::Thumbnails, "preview_thumbnails", t.mode_thumbnails, sel!(selectThumbnails:)),
+            (DisplayMode::AppIcons, "preview_appicons", t.mode_appicons, sel!(selectAppIcons:)),
+            (DisplayMode::Titles, "preview_titles", t.mode_titles, sel!(selectTitles:)),
         ];
         for (i, (mode, image, label_text, action)) in modes.iter().enumerate() {
             let x = start + (i as f64) * (tile_w + gap);
@@ -436,11 +486,12 @@ impl AppController {
     /// Volet « Raccourci » : modificateur de déclenchement.
     fn build_shortcut_pane(&self, s: &Settings) -> Retained<NSView> {
         let mtm = self.ivars().mtm;
+        let t = self.t();
         let pane = make_pane(mtm);
         let mut y = PANE_H - 40.0;
-        pane.addSubview(&section(mtm, "Déclencheur", rect(20.0, y, PANE_W - 40.0, 18.0)));
+        pane.addSubview(&section(mtm, t.trigger, rect(20.0, y, PANE_W - 40.0, 18.0)));
         y -= 36.0;
-        pane.addSubview(&label(mtm, "Touche maintenue (puis Tab) :", rect(20.0, y, 220.0, 22.0)));
+        pane.addSubview(&label(mtm, t.hold_key, rect(20.0, y, 220.0, 22.0)));
         let idx = match s.trigger {
             TriggerModifier::Option => 0,
             TriggerModifier::Command => 1,
@@ -449,13 +500,11 @@ impl AppController {
         pane.addSubview(&popup(mtm, &["⌥ Option", "⌘ Command", "⌃ Control"], idx,
             sel!(triggerChanged:), self, rect(248.0, y - 2.0, 180.0, 26.0)));
         y -= 40.0;
-        pane.addSubview(&checkbox(mtm, "Désactiver le Cmd-Tab du système",
+        pane.addSubview(&checkbox(mtm, t.disable_cmd_tab,
             sel!(toggleDisableCmdTab:), self, s.disable_native_cmd_tab,
             rect(20.0, y, PANE_W - 40.0, 22.0)));
         y -= 40.0;
-        let hint = label(mtm,
-            "Pendant l'overlay : « m » change le mode · « q » quitte l'app · « , » réglages.",
-            rect(20.0, y, PANE_W - 40.0, 18.0));
+        let hint = label(mtm, t.overlay_hint, rect(20.0, y, PANE_W - 40.0, 18.0));
         hint.setFont(Some(&NSFont::systemFontOfSize(11.0)));
         hint.setTextColor(Some(&NSColor::secondaryLabelColor()));
         pane.addSubview(&hint);
@@ -465,21 +514,19 @@ impl AppController {
     /// Volet « Permissions » : état et autorisation.
     fn build_permissions_pane(&self) -> Retained<NSView> {
         let mtm = self.ivars().mtm;
+        let t = self.t();
         let pane = make_pane(mtm);
         let mut y = PANE_H - 40.0;
-        pane.addSubview(&section(mtm, "Permissions", rect(20.0, y, PANE_W - 40.0, 18.0)));
+        pane.addSubview(&section(mtm, t.permissions, rect(20.0, y, PANE_W - 40.0, 18.0)));
         y -= 34.0;
-        self.add_permission_row(&pane, "Accessibilité",
+        self.add_permission_row(&pane, t.accessibility,
             permissions::is_accessibility_granted(), sel!(grantAccessibility:), y);
         y -= 34.0;
         let screen_granted = permissions::is_screen_recording_granted();
-        self.add_permission_row(&pane, "Enregistrement de l'écran",
+        self.add_permission_row(&pane, t.screen_recording,
             screen_granted, sel!(grantScreenRecording:), y);
         y -= 40.0;
-        let note = label(mtm,
-            "L'Accessibilité est requise et s'active immédiatement. \
-             L'enregistrement d'écran active les miniatures après un relancement.",
-            rect(20.0, y, PANE_W - 40.0, 34.0));
+        let note = label(mtm, t.permissions_note, rect(20.0, y, PANE_W - 40.0, 34.0));
         note.setFont(Some(&NSFont::systemFontOfSize(11.0)));
         note.setTextColor(Some(&NSColor::secondaryLabelColor()));
         pane.addSubview(&note);
@@ -488,10 +535,10 @@ impl AppController {
         // « Relancer Tabs » n'apparaît que pour l'enregistrement d'écran, dont
         // la prise en compte par le process nécessite un redémarrage (macOS).
         y -= 38.0;
-        pane.addSubview(&button(mtm, "Rafraîchir", sel!(refreshPermissions:), self,
+        pane.addSubview(&button(mtm, t.refresh, sel!(refreshPermissions:), self,
             rect(20.0, y, 120.0, 26.0)));
         if screen_granted {
-            pane.addSubview(&button(mtm, "Relancer Tabs", sel!(relaunchApp:), self,
+            pane.addSubview(&button(mtm, t.relaunch_tabs, sel!(relaunchApp:), self,
                 rect(150.0, y, 140.0, 26.0)));
         }
         pane
@@ -506,14 +553,15 @@ impl AppController {
             view.setFrame(rect((PANE_W - 72.0) / 2.0, PANE_H - 120.0, 72.0, 72.0));
             pane.addSubview(&view);
         }
+        let t = self.t();
         let title = label(mtm, "Tabs", rect(0.0, PANE_H - 158.0, PANE_W, 28.0));
         title.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
         title.setAlignment(NSTextAlignment::Center);
         pane.addSubview(&title);
         for (i, (text, secondary)) in [
-            ("Commutateur de fenêtres pour macOS", true),
+            (t.about_tagline, true),
             ("Version 0.1.0", false),
-            ("Libre · GPL-3.0", true),
+            (t.about_free, true),
         ]
         .iter()
         .enumerate()
@@ -595,14 +643,15 @@ impl AppController {
         y: f64,
     ) {
         let mtm = self.ivars().mtm;
+        let t = self.t();
         let status = if granted {
-            format!("✅ {name} — accordée")
+            format!("✅ {name} — {}", t.granted_suffix)
         } else {
-            format!("⚠️ {name} — non accordée")
+            format!("⚠️ {name} — {}", t.not_granted_suffix)
         };
         content.addSubview(&label(mtm, &status, rect(24.0, y, 300.0, 22.0)));
         if !granted {
-            content.addSubview(&button(mtm, "Autoriser", action, self, rect(330.0, y - 4.0, 104.0, 26.0)));
+            content.addSubview(&button(mtm, t.authorize, action, self, rect(330.0, y - 4.0, 104.0, 26.0)));
         }
     }
 }

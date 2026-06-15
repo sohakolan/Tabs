@@ -12,6 +12,7 @@
 mod app_ui;
 mod config;
 mod hotkey;
+mod i18n;
 mod login;
 mod permissions;
 mod system;
