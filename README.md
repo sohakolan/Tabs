@@ -9,9 +9,7 @@ Un commutateur de fenêtres pour macOS, écrit en **Rust** — libre, léger et 
 Prérequis : **Rust** stable et **macOS 14+** (Sonoma).
 
 ```sh
-make signing-setup   # une seule fois : identité de signature stable (permissions persistantes)
-make bundle          # compile en release et assemble dist/Tabs.app
-make run             # build + bundle + lance dist/Tabs.app
+make run     # compile, assemble dist/Tabs.app et le lance
 ```
 
 Au premier lancement, autorise « Tabs » dans **Réglages Système › Confidentialité et
@@ -24,16 +22,6 @@ sécurité** :
 Dans le volet **Permissions** des préférences : « Rafraîchir » réévalue les statuts (et
 active le raccourci dès que l'Accessibilité est accordée, sans relancer) ; « Relancer Tabs »
 applique l'enregistrement d'écran (cette permission n'est prise en compte qu'au redémarrage).
-
-> **Pourquoi `make signing-setup` ?** En signature ad-hoc, l'identité de code change à chaque
-> build et macOS (TCC) réoublie les permissions. Une identité de signature stable les fait
-> persister entre les rebuilds — à exécuter une seule fois.
-
-Pour itérer pendant le développement :
-
-```sh
-cargo run     # lance le binaire nu (utile pour les logs ; l'app reste un agent)
-```
 
 ## Pourquoi
 
@@ -56,6 +44,21 @@ instantané, une faible empreinte mémoire (pas de runtime Swift) et des miniatu
 - **Miniatures** : ScreenCaptureKit (macOS 14+), rendu *zéro-copie* via IOSurface.
 - **Spaces / focus fiable** : API privées SkyLight/CGS (`_AXUIElementGetWindow`,
   `_SLPSSetFrontProcessWithOptions`, …).
+
+## Développement
+
+Pour contribuer ou itérer sur le code :
+
+```sh
+make signing-setup   # une seule fois : identité de signature stable
+make bundle          # compile en release et assemble dist/Tabs.app
+cargo run            # lance le binaire nu (utile pour les logs ; l'app reste un agent)
+```
+
+> **Pourquoi `make signing-setup` ?** En signature ad-hoc, l'identité de code change à chaque
+> build et macOS (TCC) réoublie les permissions, qu'il faut alors ré-accorder après chaque
+> rebuild. Une identité de signature stable les fait persister — utile quand on recompile
+> souvent. Un simple usage (un seul `make run`) n'en a pas besoin.
 
 ## Licence
 
