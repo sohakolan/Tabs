@@ -97,7 +97,31 @@ pub fn list_windows() -> Vec<Window> {
         }
     }
 
+    // 3. Applications du Dock sans aucune fenêtre (ex. Aperçu ouvert mais sans
+    //    document). Comportement Cmd-Tab : on les liste quand même ; les activer
+    //    les ramène au premier plan. Id synthétique (dérivé du pid, hors plage
+    //    des vrais numéros CoreGraphics) pour éviter toute collision.
+    let represented: HashSet<i32> = out.iter().map(|w| w.pid).collect();
+    for (pid, app_name) in &apps {
+        if !represented.contains(pid) {
+            out.push(Window {
+                id: app_only_id(*pid),
+                pid: *pid,
+                app_name: app_name.clone(),
+                title: String::new(),
+                minimized: false,
+            });
+        }
+    }
+
     out
+}
+
+/// Id de fenêtre synthétique pour une application sans fenêtre, dérivé du pid.
+/// Placé tout en haut de la plage `u32`, là où les vrais numéros de fenêtre
+/// CoreGraphics (séquentiels depuis de petites valeurs) n'arrivent jamais.
+fn app_only_id(pid: i32) -> WindowId {
+    0xF000_0000 | (pid as u32 & 0x0FFF_FFFF)
 }
 
 /// Réordonne `windows` selon l'historique d'usage `mru` (plus récent d'abord).
