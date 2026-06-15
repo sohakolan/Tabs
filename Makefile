@@ -1,4 +1,4 @@
-.PHONY: build bundle run dev test clean icon signing-setup
+.PHONY: build bundle run dev test clean icon signing-setup dmg
 
 # Régénère assets/AppIcon.icns depuis assets/icon.svg.
 icon:
@@ -16,6 +16,10 @@ build:
 # Assemble dist/Tabs.app (binaire release + Info.plist + signature ad-hoc).
 bundle:
 	./scripts/bundle.sh
+
+# Assemble un fichier d'installation dist/Tabs-<arch>.dmg (pour une release).
+dmg: bundle
+	./scripts/dmg.sh
 
 # Build + bundle puis lance l'application packagée.
 run: bundle

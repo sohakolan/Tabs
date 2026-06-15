@@ -6,11 +6,30 @@ Un commutateur de fenêtres pour macOS, écrit en **Rust** — libre, léger et 
 
 ## Installation
 
-Prérequis : **Rust** stable et **macOS 14+** (Sonoma).
+### Télécharger (recommandé)
+
+1. Récupère **`Tabs-arm64.dmg`** sur la page
+   [Releases](https://github.com/sohakolan/Tabs/releases).
+2. Ouvre le DMG et glisse **Tabs** dans **Applications**.
+3. L'app n'est pas notarisée par Apple (ça nécessite un compte développeur payant), donc
+   macOS la bloque au premier lancement. Lève la quarantaine puis ouvre-la :
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Tabs.app
+   open /Applications/Tabs.app
+   ```
+
+> Compatibilité : build **Apple Silicon (arm64)**, **macOS 14+** (Sonoma).
+
+### Construire depuis les sources
+
+Prérequis : **Rust** stable et **macOS 14+**.
 
 ```sh
 make run     # compile, assemble dist/Tabs.app et le lance
 ```
+
+### Permissions
 
 Au premier lancement, autorise « Tabs » dans **Réglages Système › Confidentialité et
 sécurité** :
@@ -52,6 +71,7 @@ Pour contribuer ou itérer sur le code :
 ```sh
 make signing-setup   # une seule fois : identité de signature stable
 make bundle          # compile en release et assemble dist/Tabs.app
+make dmg             # assemble dist/Tabs-<arch>.dmg (fichier d'installation pour une release)
 cargo run            # lance le binaire nu (utile pour les logs ; l'app reste un agent)
 ```
 
