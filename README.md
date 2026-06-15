@@ -57,22 +57,6 @@ instantané, une faible empreinte mémoire (pas de runtime Swift) et des miniatu
 - **Spaces / focus fiable** : API privées SkyLight/CGS (`_AXUIElementGetWindow`,
   `_SLPSSetFrontProcessWithOptions`, …).
 
-## Feuille de route
-
-| Jalon | Contenu | État |
-|-------|---------|------|
-| **M0** | Scaffolding : app agent (`NSApplication` `.accessory`), permission Accessibilité, bundle `.app` | ✅ |
-| **M1** | Déclencheur Option-Tab (`CGEventTap`, cycle, commit au relâchement, annulation Échap) | ✅ |
-| **M2** | Énumération : fenêtres visibles (`CGWindowList`, apps du Dock, hors soi) **+ fenêtres minimisées** (via Accessibilité) · **titres réels** (onglet actif, piste Spotify…) | ✅ |
-| **M3** | Overlay : `NSPanel` non-activant, rangée icône+titre, surbrillance/navigation clavier | ✅ |
-| **M4** | Activation de la fenêtre sélectionnée → **MVP utilisable** | ✅ |
-| **M5** | Miniatures de fenêtres (`CGWindowListCreateImage`, repli icône) | ✅ |
-| **Modes** | Affichage commutable Thumbnails/AppIcons/Titles (touche `m`) · **souris** (survol/clic) | ✅ |
-| **Réglages** | `q` quitte l'app sélectionnée · `,` préférences · Cmd-Q / menu pour quitter Tabs · préférences ouvertes au lancement et au clic Dock | ✅ |
-| **Préférences** | Vraie fenêtre **à onglets** (Général · Apparence · Raccourci · Permissions · À propos) : en-tête logo, **tuiles d'aperçu** des 3 modes, **modificateur** (⌥/⌘/⌃), visibilité Dock/menu, **lancement au démarrage**, **statut des permissions** (auto-rafraîchi) | ✅ |
-| **Identité** | Logo/icône d'app (`assets/icon.svg` → `AppIcon.icns`) + aperçus de modes, intégrés au bundle | ✅ |
-| Post-MVP | Migration ScreenCaptureKit · Spaces · multi-écran · recherche · actions traffic-light · gestes · focus renforcé (SLPS) · a11y · i18n | — |
-
 ## Licence
 
 [GPL-3.0-or-later](LICENSE).
