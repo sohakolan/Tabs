@@ -14,7 +14,7 @@ pub use state::{Action, Input, Switcher};
 
 use crate::config::TriggerModifier;
 use crate::ui::{DisplayMode, Overlay};
-use crate::windows::{self, Window};
+use crate::windows::{self, Window, WindowId};
 
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
@@ -46,6 +46,11 @@ struct TapState {
     /// Instantané des fenêtres pris à l'ouverture du sélecteur ; l'index
     /// sélectionné par la [`Switcher`] désigne une entrée de ce vecteur.
     windows: Vec<Window>,
+    /// Ordre d'usage récent des fenêtres (id, plus récent d'abord). macOS
+    /// regroupe l'ordre z par application dès qu'on active une fenêtre ; on
+    /// maintient donc notre propre historique pour conserver un vrai ordre
+    /// MRU par fenêtre (cf. [`windows::order_by_mru`]).
+    mru: Vec<WindowId>,
     /// Mode d'affichage courant des cellules.
     mode: DisplayMode,
     /// Modificateur qui déclenche/maintient le cycle (Option par défaut, ou
@@ -64,6 +69,7 @@ thread_local! {
     static STATE: RefCell<TapState> = RefCell::new(TapState {
         switcher: Switcher::new(),
         windows: Vec::new(),
+        mru: Vec::new(),
         mode: DisplayMode::Thumbnails,
         trigger_flag: CGEventFlags::MaskAlternate,
         overlay: None,
@@ -162,44 +168,25 @@ unsafe extern "C-unwind" fn tap_callback(
 
     match event_type {
         CGEventType::KeyDown => {
-            let keycode = keycode(ev);
-            if keycode == KEYCODE_TAB && trigger_held {
-                on_tab(shift_held);
-                return swallow;
+            // Aucun raccourci possible hors de ces deux états : on évite le
+            // coût de `classify` (round-trip NSEvent) sur le flux ambiant.
+            if !trigger_held && !is_active() {
+                return passthrough;
             }
-            if keycode == KEYCODE_ESCAPE && is_active() {
-                dispatch(Input::Escape);
-                return swallow;
+            match classify(ev) {
+                Some(Shortcut::Tab) if trigger_held => on_tab(shift_held),
+                Some(Shortcut::Escape) if is_active() => dispatch(Input::Escape),
+                Some(Shortcut::CycleMode) if is_active() => cycle_mode(),
+                Some(Shortcut::Quit) if is_active() => quit_selected_app(),
+                Some(Shortcut::Prefs) if is_active() => open_prefs(),
+                _ => return passthrough,
             }
-            // Lettres/virgule : repérées par caractère (agencement clavier).
-            if is_active() {
-                match typed_char(ev) {
-                    Some('m') => {
-                        cycle_mode();
-                        return swallow;
-                    }
-                    Some('q') => {
-                        quit_selected_app();
-                        return swallow;
-                    }
-                    Some(',') => {
-                        open_prefs();
-                        return swallow;
-                    }
-                    _ => {}
-                }
-            }
-            passthrough
+            swallow
         }
         CGEventType::KeyUp => {
-            let keycode = keycode(ev);
             // Tant que le sélecteur est actif, on retient les relâchements des
             // touches qu'il consomme pour qu'elles n'atteignent pas l'app active.
-            if is_active()
-                && (keycode == KEYCODE_TAB
-                    || keycode == KEYCODE_ESCAPE
-                    || matches!(typed_char(ev), Some('m') | Some('q') | Some(',')))
-            {
+            if is_active() && classify(ev).is_some() {
                 return swallow;
             }
             passthrough
@@ -212,6 +199,32 @@ unsafe extern "C-unwind" fn tap_callback(
             passthrough
         }
         _ => passthrough,
+    }
+}
+
+/// Raccourci clavier reconnu par le sélecteur.
+enum Shortcut {
+    Tab,
+    Escape,
+    CycleMode,
+    Quit,
+    Prefs,
+}
+
+/// Identifie le raccourci correspondant à un évènement, source de vérité
+/// partagée par les chemins keyDown et keyUp. Tab et Échap sont repérés par
+/// keycode physique (identique sur tous les agencements) ; les lettres et la
+/// virgule par le caractère tapé, donc indépendamment de l'agencement.
+fn classify(ev: &CGEvent) -> Option<Shortcut> {
+    match keycode(ev) {
+        KEYCODE_TAB => Some(Shortcut::Tab),
+        KEYCODE_ESCAPE => Some(Shortcut::Escape),
+        _ => match typed_char(ev)? {
+            'm' => Some(Shortcut::CycleMode),
+            'q' => Some(Shortcut::Quit),
+            ',' => Some(Shortcut::Prefs),
+            _ => None,
+        },
     }
 }
 
@@ -237,7 +250,8 @@ fn on_tab(shift: bool) {
     let action = STATE.with(|s| {
         let mut st = s.borrow_mut();
         if !st.switcher.is_active() {
-            let windows = windows::list_windows();
+            let st = &mut *st;
+            let windows = windows::order_by_mru(windows::list_windows(), &mut st.mru);
             st.switcher.set_count(windows.len());
             st.windows = windows;
         }

@@ -25,12 +25,23 @@ use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSStr
 use super::layout::{self, DisplayMode, Rect};
 use crate::windows::{self, Window};
 
+/// Déplacement souris (en points) requis avant que le survol reprenne la main
+/// après l'ouverture de l'overlay. Évite qu'un curseur immobile sous l'overlay
+/// ne détourne la sélection clavier, tout en absorbant le jitter du trackpad.
+const HOVER_MOVE_THRESHOLD: f64 = 6.0;
+
 /// Données portées par la vue de contenu de l'overlay.
 struct OverlayViewIvars {
     /// Rectangles cliquables/survolables par index (coordonnées de la vue).
     cells: RefCell<Vec<NSRect>>,
     /// Dernier index survolé (-1 = aucun), pour ne notifier qu'aux changements.
     last_hover: Cell<isize>,
+    /// Position écran de la souris au moment de l'ouverture. Le survol n'est
+    /// honoré qu'après un déplacement réel depuis cet ancrage, sinon l'overlay
+    /// apparaissant sous un curseur immobile détournerait la sélection clavier.
+    anchor: Cell<NSPoint>,
+    /// `true` une fois la souris déplacée depuis l'ouverture (survol actif).
+    armed: Cell<bool>,
     /// Rappel au survol d'une cellule (index).
     on_hover: Box<dyn Fn(usize)>,
     /// Rappel au clic sur une cellule (index).
@@ -81,6 +92,8 @@ impl OverlayView {
         let this = Self::alloc(mtm).set_ivars(OverlayViewIvars {
             cells: RefCell::new(Vec::new()),
             last_hover: Cell::new(-1),
+            anchor: Cell::new(NSPoint::ZERO),
+            armed: Cell::new(false),
             on_hover,
             on_click,
         });
@@ -107,6 +120,10 @@ impl OverlayView {
     fn set_cells(&self, rects: Vec<NSRect>) {
         *self.ivars().cells.borrow_mut() = rects;
         self.ivars().last_hover.set(-1);
+        // Désarme le survol et ancre la position courante de la souris : il
+        // faudra un déplacement réel pour que le survol reprenne la main.
+        self.ivars().armed.set(false);
+        self.ivars().anchor.set(NSEvent::mouseLocation());
     }
 
     /// Index de la cellule sous le curseur pour un évènement, le cas échéant.
@@ -120,14 +137,33 @@ impl OverlayView {
             .position(|r| point_in(*r, p))
     }
 
-    /// Notifie le survol si la cellule sous le curseur a changé.
+    /// Notifie le survol si la cellule sous le curseur a changé. Ignoré tant que
+    /// la souris n'a pas réellement bougé depuis l'ouverture de l'overlay.
     fn handle_hover(&self, event: &NSEvent) {
+        if !self.armed_after_move() {
+            return;
+        }
         if let Some(i) = self.cell_at(event) {
             if self.ivars().last_hover.get() != i as isize {
                 self.ivars().last_hover.set(i as isize);
                 (self.ivars().on_hover)(i);
             }
         }
+    }
+
+    /// `true` une fois que la souris s'est éloignée de l'ancrage capturé à
+    /// l'ouverture (seuil anti-jitter). Le survol reste alors actif.
+    fn armed_after_move(&self) -> bool {
+        if self.ivars().armed.get() {
+            return true;
+        }
+        let now = NSEvent::mouseLocation();
+        let anchor = self.ivars().anchor.get();
+        let moved = (now.x - anchor.x).hypot(now.y - anchor.y) > HOVER_MOVE_THRESHOLD;
+        if moved {
+            self.ivars().armed.set(true);
+        }
+        moved
     }
 }
 
