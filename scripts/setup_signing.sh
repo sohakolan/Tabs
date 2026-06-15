@@ -39,9 +39,17 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -keyout "$TMP/key.pem" -out "$TMP/cert.pem" \
   -config "$TMP/openssl.cnf" -extensions v3 >/dev/null 2>&1
 
+# macOS `security import` ne lit que les PKCS12 « legacy » : MAC SHA-1 +
+# chiffrement 3DES/RC2. OpenSSL 3 génère par défaut un MAC SHA-256 + AES, refusé
+# par macOS (« MAC verification failed »). On force donc les algos legacy quand
+# l'option existe (OpenSSL 3) ; LibreSSL les produit déjà par défaut.
+P12_OPTS=()
+if openssl pkcs12 -help 2>&1 | grep -q -- '-legacy'; then
+  P12_OPTS+=(-legacy -macalg sha1)
+fi
 openssl pkcs12 -export -name "$NAME" \
   -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-  -out "$TMP/id.p12" -passout pass:tabs >/dev/null 2>&1
+  -out "$TMP/id.p12" -passout pass:tabs "${P12_OPTS[@]}" >/dev/null 2>&1
 
 echo "[signing] import dans le trousseau de session (peut demander ton mot de passe)…"
 security import "$TMP/id.p12" -k "$KEYCHAIN" -P tabs -A -T /usr/bin/codesign

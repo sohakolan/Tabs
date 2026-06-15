@@ -35,6 +35,9 @@ pub(crate) struct Ivars {
     mtm: MainThreadMarker,
     settings: RefCell<Settings>,
     prefs_window: RefCell<Option<Retained<NSWindow>>>,
+    /// Vue à onglets des préférences, pour mémoriser/restaurer l'onglet actif
+    /// lors d'un rafraîchissement (la fenêtre est reconstruite à chaque fois).
+    prefs_tabs: RefCell<Option<Retained<NSTabView>>>,
     status_item: RefCell<Option<Retained<NSStatusItem>>>,
     /// Boîtes de surbrillance des tuiles de mode (pour mettre à jour la
     /// sélection), reconstruites à chaque ouverture des préférences.
@@ -145,6 +148,14 @@ define_class!(
         fn action_grant_screen_recording(&self, _sender: Option<&AnyObject>) {
             permissions::ensure_screen_recording();
         }
+
+        #[unsafe(method(refreshPermissions:))]
+        fn action_refresh_permissions(&self, _sender: Option<&AnyObject>) {
+            // Revérifie les permissions : active le tap si l'Accessibilité vient
+            // d'être accordée, puis reconstruit la fenêtre (statuts à jour).
+            crate::hotkey::ensure_tap_installed();
+            self.present_preferences();
+        }
     }
 
     // SAFETY: NSObjectProtocol n'a pas d'exigence de sûreté.
@@ -181,6 +192,7 @@ impl AppController {
             mtm,
             settings: RefCell::new(settings),
             prefs_window: RefCell::new(None),
+            prefs_tabs: RefCell::new(None),
             status_item: RefCell::new(None),
             tiles: RefCell::new(Vec::new()),
         });
@@ -298,15 +310,24 @@ impl AppController {
     /// Construit une fenêtre de préférences fraîche et l'affiche (en fermant la
     /// précédente).
     fn present_preferences(&self) {
+        // Mémorise l'onglet actif pour le restaurer après reconstruction (un
+        // rafraîchissement ne doit pas renvoyer l'utilisateur sur « Général »).
+        let selected = self
+            .ivars()
+            .prefs_tabs
+            .borrow()
+            .as_ref()
+            .and_then(|t| t.selectedTabViewItem().map(|item| t.indexOfTabViewItem(&item)))
+            .unwrap_or(0);
         if let Some(old) = self.ivars().prefs_window.borrow_mut().take() {
             old.orderOut(None);
         }
-        let window = self.build_preferences_window();
+        let window = self.build_preferences_window(selected);
         window.makeKeyAndOrderFront(None);
         *self.ivars().prefs_window.borrow_mut() = Some(window);
     }
 
-    fn build_preferences_window(&self) -> Retained<NSWindow> {
+    fn build_preferences_window(&self, select_tab: isize) -> Retained<NSWindow> {
         let mtm = self.ivars().mtm;
         let settings = self.ivars().settings.borrow().clone();
         self.ivars().tiles.borrow_mut().clear();
@@ -353,7 +374,13 @@ impl AppController {
         self.add_pane(&tabs, "Raccourci", &self.build_shortcut_pane(&settings));
         self.add_pane(&tabs, "Permissions", &self.build_permissions_pane());
         self.add_pane(&tabs, "À propos", &self.build_about_pane());
+        // Restaure l'onglet demandé (borné au nombre d'onglets).
+        let count = tabs.numberOfTabViewItems();
+        if select_tab > 0 && select_tab < count {
+            tabs.selectTabViewItemAtIndex(select_tab);
+        }
         content.addSubview(&tabs);
+        *self.ivars().prefs_tabs.borrow_mut() = Some(tabs);
 
         window
     }
@@ -456,12 +483,16 @@ impl AppController {
         note.setFont(Some(&NSFont::systemFontOfSize(11.0)));
         note.setTextColor(Some(&NSColor::secondaryLabelColor()));
         pane.addSubview(&note);
-        // Une fois l'enregistrement d'écran accordé, un relancement est requis
-        // pour que le process en bénéficie (limite macOS) : on l'offre en un clic.
+        // Boutons d'action en pied de volet : « Rafraîchir » revérifie les
+        // statuts (et active le tap si l'Accessibilité vient d'être accordée).
+        // « Relancer Tabs » n'apparaît que pour l'enregistrement d'écran, dont
+        // la prise en compte par le process nécessite un redémarrage (macOS).
+        y -= 38.0;
+        pane.addSubview(&button(mtm, "Rafraîchir", sel!(refreshPermissions:), self,
+            rect(20.0, y, 120.0, 26.0)));
         if screen_granted {
-            y -= 34.0;
             pane.addSubview(&button(mtm, "Relancer Tabs", sel!(relaunchApp:), self,
-                rect(20.0, y, 140.0, 26.0)));
+                rect(150.0, y, 140.0, 26.0)));
         }
         pane
     }

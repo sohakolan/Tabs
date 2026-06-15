@@ -24,15 +24,18 @@ cp assets/preview_thumbnails.png assets/preview_appicons.png assets/preview_titl
 # par scripts/setup_signing.sh) pour que les permissions (Accessibilité,
 # Enregistrement de l'écran) persistent entre les rebuilds. À défaut, signature
 # ad-hoc (les permissions seront alors redemandées après chaque build).
+# On accepte l'identité même NON approuvée (« CSSMERR_TP_NOT_TRUSTED ») : un
+# cert auto-signé suffit à `codesign`, et c'est l'unique condition pour que TCC
+# garde les permissions (il lui faut une identité STABLE, pas approuvée). D'où
+# `find-identity -p codesigning` SANS `-v` (qui, lui, masque les non approuvées).
 IDENTITY="Tabs Dev"
-if security find-identity -v -p codesigning 2>/dev/null | grep -q "$IDENTITY"; then
-	codesign --force --sign "$IDENTITY" "$APP" >/dev/null 2>&1 \
-		&& echo "[bundle] signé avec l'identité stable « $IDENTITY »." \
-		|| echo "[bundle] échec de signature avec « $IDENTITY »."
+if security find-identity -p codesigning 2>/dev/null | grep -q "$IDENTITY" \
+	&& codesign --force --sign "$IDENTITY" "$APP" >/dev/null 2>&1; then
+	echo "[bundle] signé avec l'identité stable « $IDENTITY » (permissions persistantes)."
+elif codesign --force --sign - "$APP" >/dev/null 2>&1; then
+	echo "[bundle] signé en ad-hoc (lance scripts/setup_signing.sh pour des permissions persistantes)."
 else
-	codesign --force --sign - "$APP" >/dev/null 2>&1 \
-		&& echo "[bundle] signé en ad-hoc (lance scripts/setup_signing.sh pour des permissions persistantes)." \
-		|| echo "[bundle] codesign indisponible, bundle non signé."
+	echo "[bundle] codesign indisponible, bundle non signé."
 fi
 
 echo "[bundle] terminé : $APP"
