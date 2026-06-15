@@ -1,4 +1,4 @@
-//! Tabs — un window switcher façon commutateur de fenêtres pour macOS, écrit en Rust.
+//! Tabs — un commutateur de fenêtres pour macOS, écrit en Rust.
 //!
 //! Objectif du projet : un sélecteur de fenêtres complet, libre (GPL-3.0) et
 //! performant. Voir le README pour la feuille de route.

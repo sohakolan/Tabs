@@ -34,7 +34,7 @@ pub enum Action {
     None,
 }
 
-/// État du cycle commutateur de fenêtres : actif ou non, et index sélectionné parmi `count`
+/// État du cycle de bascule : actif ou non, et index sélectionné parmi `count`
 /// fenêtres.
 #[derive(Debug)]
 pub struct Switcher {

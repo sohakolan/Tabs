@@ -1,13 +1,43 @@
 # Tabs
 
-Un *window switcher* façon **commutateur de fenêtres** pour macOS, écrit en **Rust** — libre, léger
-et rapide.
+> *Parce qu'on ne devrait pas avoir à payer pour une fonction qui devrait être native.*
+
+Un commutateur de fenêtres pour macOS, écrit en **Rust** — libre, léger et rapide.
+
+## Installation
+
+Prérequis : **Rust** stable et **macOS 14+** (Sonoma).
+
+```sh
+make signing-setup   # une seule fois : identité de signature stable (permissions persistantes)
+make bundle          # compile en release et assemble dist/Tabs.app
+make run             # build + bundle + lance dist/Tabs.app
+```
+
+Au premier lancement, autorise « Tabs » dans **Réglages Système › Confidentialité et
+sécurité** :
+
+- **Accessibilité** (obligatoire) — observer le clavier et lister/activer les fenêtres ;
+- **Enregistrement de l'écran** (optionnel) — affiche les miniatures (sinon repli sur les
+  icônes d'application).
+
+Dans le volet **Permissions** des préférences : « Rafraîchir » réévalue les statuts (et
+active le raccourci dès que l'Accessibilité est accordée, sans relancer) ; « Relancer Tabs »
+applique l'enregistrement d'écran (cette permission n'est prise en compte qu'au redémarrage).
+
+> **Pourquoi `make signing-setup` ?** En signature ad-hoc, l'identité de code change à chaque
+> build et macOS (TCC) réoublie les permissions. Une identité de signature stable les fait
+> persister entre les rebuilds — à exécuter une seule fois.
+
+Pour itérer pendant le développement :
+
+```sh
+cargo run     # lance le binaire nu (utile pour les logs ; l'app reste un agent)
+```
 
 ## Pourquoi
 
-> *Parce qu'on ne devrait pas avoir à payer pour une fonction qui devrait être native.*
-
-macOS n'offre pas de véritable sélecteur de fenêtres. **Tabs** comble ce manque —
+macOS n'offre pas de véritable commutateur de fenêtres. **Tabs** comble ce manque —
 gratuitement et sous licence **GPL-3.0** — avec pour objectifs un démarrage à froid quasi
 instantané, une faible empreinte mémoire (pas de runtime Swift) et des miniatures
 *zéro-copie* via ScreenCaptureKit.
@@ -27,9 +57,6 @@ instantané, une faible empreinte mémoire (pas de runtime Swift) et des miniatu
 - **Spaces / focus fiable** : API privées SkyLight/CGS (`_AXUIElementGetWindow`,
   `_SLPSSetFrontProcessWithOptions`, …).
 
-**Cible : macOS 14+ (Sonoma).** Permissions requises : **Accessibilité** (obligatoire) et
-**Enregistrement de l'écran** (pour les miniatures).
-
 ## Feuille de route
 
 | Jalon | Contenu | État |
@@ -45,33 +72,6 @@ instantané, une faible empreinte mémoire (pas de runtime Swift) et des miniatu
 | **Préférences** | Vraie fenêtre **à onglets** (Général · Apparence · Raccourci · Permissions · À propos) : en-tête logo, **tuiles d'aperçu** des 3 modes, **modificateur** (⌥/⌘/⌃), visibilité Dock/menu, **lancement au démarrage**, **statut des permissions** (auto-rafraîchi) | ✅ |
 | **Identité** | Logo/icône d'app (`assets/icon.svg` → `AppIcon.icns`) + aperçus de modes, intégrés au bundle | ✅ |
 | Post-MVP | Migration ScreenCaptureKit · Spaces · multi-écran · recherche · actions traffic-light · gestes · focus renforcé (SLPS) · a11y · i18n | — |
-
-## Build & lancement
-
-Prérequis : Rust stable et macOS 14+.
-
-```sh
-make bundle   # compile en release et assemble dist/Tabs.app
-make run      # build + bundle + lance dist/Tabs.app
-```
-
-Au premier lancement, autorise « Tabs » dans **Réglages Système › Confidentialité et
-sécurité › Accessibilité**, puis relance.
-
-> **Permissions qui « s'oublient » après chaque rebuild ?** En signature ad-hoc, l'identité
-> de code change à chaque build et macOS redemande les permissions. Crée une fois une identité
-> de signature stable :
-> ```sh
-> make signing-setup   # crée l'identité auto-signée « Tabs Dev » (peut demander ton mot de passe)
-> make bundle          # désormais signé de façon stable
-> ```
-> Accorde alors les permissions **une dernière fois** : elles persisteront entre les rebuilds.
-
-Pour itérer rapidement pendant le développement :
-
-```sh
-cargo run     # lance le binaire nu (utile pour les logs ; l'app reste un agent)
-```
 
 ## Licence
 

@@ -2,7 +2,7 @@
 name = "tabs"
 version = "0.1.0"
 edition = "2024"
-description = "Un window switcher façon commutateur de fenêtres pour macOS, libre et performant"
+description = "Un commutateur de fenêtres pour macOS, libre et performant"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/sohakolan/Tabs"
 readme = "README.md"
