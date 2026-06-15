@@ -265,8 +265,8 @@ fn dispatch(input: Input) {
     perform(action);
 }
 
-/// Quitte l'application de la fenêtre sélectionnée (comme le « Q » d'commutateur de fenêtres) et
-/// met à jour l'overlay : les fenêtres de cette app sont retirées tout de suite.
+/// Quitte l'application de la fenêtre sélectionnée (touche « q ») et met à jour
+/// l'overlay : les fenêtres de cette app sont retirées tout de suite.
 fn quit_selected_app() {
     STATE.with(|s| {
         let mut st = s.borrow_mut();

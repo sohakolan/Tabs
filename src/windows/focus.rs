@@ -1,6 +1,6 @@
 //! Activation d'une fenêtre : la mettre au premier plan et lui donner le focus.
 //!
-//! Stratégie (inspirée d'commutateur de fenêtres) :
+//! Stratégie :
 //! 1. On crée l'`AXUIElement` de l'application propriétaire (`pid`).
 //! 2. On parcourt ses fenêtres (`AXWindows`) en faisant correspondre chacune à
 //!    son identifiant CoreGraphics via l'API privée `_AXUIElementGetWindow`,
@@ -36,8 +36,8 @@ pub fn activate(window: &Window) -> bool {
     raised
 }
 
-/// Demande la fermeture de l'application de PID `pid` (comme le « Q » d'commutateur de fenêtres :
-/// quitte l'application sélectionnée).
+/// Demande la fermeture de l'application de PID `pid` (touche « q » : quitte
+/// l'application sélectionnée).
 pub fn quit_app(pid: i32) {
     if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
         app.terminate();

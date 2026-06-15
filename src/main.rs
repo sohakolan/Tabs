@@ -1,7 +1,7 @@
 //! Tabs — un window switcher façon commutateur de fenêtres pour macOS, écrit en Rust.
 //!
-//! Objectif du projet : réimplémenter les fonctionnalités d'commutateur de fenêtres en restant
-//! libre (GPL-3.0) et performant. Voir le README pour la feuille de route.
+//! Objectif du projet : un sélecteur de fenêtres complet, libre (GPL-3.0) et
+//! performant. Voir le README pour la feuille de route.
 //!
 //! Jalon M0 : l'application démarre comme un agent (pas d'icône dans le Dock,
 //! pas de menu) et s'assure d'avoir la permission d'Accessibilité, qui est
