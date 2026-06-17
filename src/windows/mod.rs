@@ -103,15 +103,22 @@ pub fn list_windows() -> Vec<Window> {
     //    des vrais numéros CoreGraphics) pour éviter toute collision.
     let represented: HashSet<i32> = out.iter().map(|w| w.pid).collect();
     for (pid, app_name) in &apps {
-        if !represented.contains(pid) {
-            out.push(Window {
-                id: app_only_id(*pid),
-                pid: *pid,
-                app_name: app_name.clone(),
-                title: String::new(),
-                minimized: false,
-            });
+        if represented.contains(pid) {
+            continue;
         }
+        // Finder est toujours lancé mais le plus souvent sans fenêtre : on ne le
+        // montre dans le sélecteur que s'il a une vraie fenêtre (sinon il
+        // l'encombre en permanence).
+        if focus::bundle_id(*pid).as_deref() == Some("com.apple.finder") {
+            continue;
+        }
+        out.push(Window {
+            id: app_only_id(*pid),
+            pid: *pid,
+            app_name: app_name.clone(),
+            title: String::new(),
+            minimized: false,
+        });
     }
 
     out
