@@ -59,6 +59,12 @@ struct TapState {
     /// L'overlay affiché à l'écran (créé à l'installation, sur le thread
     /// principal).
     overlay: Option<Overlay>,
+    /// Autorise la touche « q » à fermer l'app sélectionnée (désactivé par
+    /// défaut).
+    quit_with_q: bool,
+    /// Autorise la touche « w » à fermer la fenêtre sélectionnée (activé par
+    /// défaut).
+    close_with_w: bool,
     /// Rappel pour ouvrir la fenêtre de préférences (touche `,`).
     on_open_prefs: Box<dyn Fn()>,
     /// Conservé pour pouvoir réactiver le tap s'il est désactivé par le système.
@@ -72,6 +78,8 @@ thread_local! {
         mru: Vec::new(),
         mode: DisplayMode::Thumbnails,
         trigger_flag: CGEventFlags::MaskAlternate,
+        quit_with_q: false,
+        close_with_w: true,
         overlay: None,
         on_open_prefs: Box::new(|| {}),
         port: None,
@@ -205,6 +213,7 @@ unsafe extern "C-unwind" fn tap_callback(
                 Some(Shortcut::Escape) if is_active() => dispatch(Input::Escape),
                 Some(Shortcut::CycleMode) if is_active() => cycle_mode(),
                 Some(Shortcut::Quit) if is_active() => quit_selected_app(),
+                Some(Shortcut::CloseWindow) if is_active() => close_selected_window(),
                 Some(Shortcut::Prefs) if is_active() => open_prefs(),
                 _ => return passthrough,
             }
@@ -235,6 +244,7 @@ enum Shortcut {
     Escape,
     CycleMode,
     Quit,
+    CloseWindow,
     Prefs,
 }
 
@@ -249,6 +259,7 @@ fn classify(ev: &CGEvent) -> Option<Shortcut> {
         _ => match typed_char(ev)? {
             'm' => Some(Shortcut::CycleMode),
             'q' => Some(Shortcut::Quit),
+            'w' => Some(Shortcut::CloseWindow),
             ',' => Some(Shortcut::Prefs),
             _ => None,
         },
@@ -297,31 +308,64 @@ fn dispatch(input: Input) {
 fn quit_selected_app() {
     STATE.with(|s| {
         let mut st = s.borrow_mut();
-        if !st.switcher.is_active() {
+        if !st.switcher.is_active() || !st.quit_with_q {
             return;
         }
         let selected = st.switcher.selected();
-        let Some(pid) = st.windows.get(selected).map(|w| w.pid) else {
+        let Some((pid, id)) = st.windows.get(selected).map(|w| (w.pid, w.id)) else {
             return;
         };
-        windows::focus::quit_app(pid);
 
-        // Retrait optimiste des fenêtres de l'app fermée.
-        st.windows.retain(|w| w.pid != pid);
-        let count = st.windows.len();
-        st.switcher.refresh(count);
-
-        let selected = st.switcher.selected();
-        let active = st.switcher.is_active();
-        let st = &mut *st;
-        if let Some(overlay) = st.overlay.as_mut() {
-            if active && count > 0 {
-                overlay.show(&st.windows, selected, st.mode);
-            } else {
-                overlay.hide();
-            }
+        // Finder : on ferme seulement la fenêtre sélectionnée (le quitter le
+        // tuerait et il se relancerait). Les autres apps quittent normalement.
+        let is_finder = windows::focus::bundle_id(pid).as_deref() == Some("com.apple.finder");
+        if is_finder {
+            windows::ax::close_window(pid, id);
+            // Retrait optimiste de cette seule fenêtre.
+            st.windows.retain(|w| w.id != id);
+        } else {
+            windows::focus::quit_app(pid);
+            // Retrait optimiste des fenêtres de l'app fermée.
+            st.windows.retain(|w| w.pid != pid);
         }
+        refresh_after_removal(&mut st);
     });
+}
+
+/// Ferme la seule fenêtre sélectionnée (touche « w ») sans quitter
+/// l'application, pour toutes les apps, et met à jour l'overlay.
+fn close_selected_window() {
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        if !st.switcher.is_active() || !st.close_with_w {
+            return;
+        }
+        let selected = st.switcher.selected();
+        let Some((pid, id)) = st.windows.get(selected).map(|w| (w.pid, w.id)) else {
+            return;
+        };
+        windows::ax::close_window(pid, id);
+        // Retrait optimiste de cette seule fenêtre.
+        st.windows.retain(|w| w.id != id);
+        refresh_after_removal(&mut st);
+    });
+}
+
+/// Après retrait de fenêtres : recalcule la sélection et rafraîchit l'overlay
+/// (ou le masque s'il ne reste rien).
+fn refresh_after_removal(st: &mut TapState) {
+    let count = st.windows.len();
+    st.switcher.refresh(count);
+
+    let selected = st.switcher.selected();
+    let active = st.switcher.is_active();
+    if let Some(overlay) = st.overlay.as_mut() {
+        if active && count > 0 {
+            overlay.show(&st.windows, selected, st.mode);
+        } else {
+            overlay.hide();
+        }
+    }
 }
 
 /// Définit le modificateur de déclenchement (maintenu pendant le cycle).
@@ -332,6 +376,16 @@ pub fn set_trigger_modifier(modifier: TriggerModifier) {
 /// (Dés)active le commutateur d'applications natif de macOS.
 pub fn set_disable_native_cmd_tab(disable: bool) {
     crate::system::set_native_cmd_tab_enabled(!disable);
+}
+
+/// Autorise ou non la touche « q » à fermer l'app sélectionnée.
+pub fn set_quit_with_q(enabled: bool) {
+    STATE.with(|s| s.borrow_mut().quit_with_q = enabled);
+}
+
+/// Autorise ou non la touche « w » à fermer la fenêtre sélectionnée.
+pub fn set_close_with_w(enabled: bool) {
+    STATE.with(|s| s.borrow_mut().close_with_w = enabled);
 }
 
 fn modifier_flag(modifier: TriggerModifier) -> CGEventFlags {

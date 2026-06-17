@@ -130,6 +130,22 @@ define_class!(
             hotkey::set_disable_native_cmd_tab(on);
         }
 
+        #[unsafe(method(toggleQuitWithQ:))]
+        fn action_toggle_quit_with_q(&self, sender: Option<&AnyObject>) {
+            let on = checkbox_is_on(sender);
+            self.ivars().settings.borrow_mut().quit_with_q = on;
+            self.save();
+            hotkey::set_quit_with_q(on);
+        }
+
+        #[unsafe(method(toggleCloseWithW:))]
+        fn action_toggle_close_with_w(&self, sender: Option<&AnyObject>) {
+            let on = checkbox_is_on(sender);
+            self.ivars().settings.borrow_mut().close_with_w = on;
+            self.save();
+            hotkey::set_close_with_w(on);
+        }
+
         #[unsafe(method(toggleDock:))]
         fn action_toggle_dock(&self, sender: Option<&AnyObject>) {
             let on = checkbox_is_on(sender);
@@ -502,6 +518,14 @@ impl AppController {
         y -= 40.0;
         pane.addSubview(&checkbox(mtm, t.disable_cmd_tab,
             sel!(toggleDisableCmdTab:), self, s.disable_native_cmd_tab,
+            rect(20.0, y, PANE_W - 40.0, 22.0)));
+        y -= 30.0;
+        pane.addSubview(&checkbox(mtm, t.close_with_w,
+            sel!(toggleCloseWithW:), self, s.close_with_w,
+            rect(20.0, y, PANE_W - 40.0, 22.0)));
+        y -= 30.0;
+        pane.addSubview(&checkbox(mtm, t.quit_with_q,
+            sel!(toggleQuitWithQ:), self, s.quit_with_q,
             rect(20.0, y, PANE_W - 40.0, 22.0)));
         y -= 40.0;
         let hint = label(mtm, t.overlay_hint, rect(20.0, y, PANE_W - 40.0, 18.0));

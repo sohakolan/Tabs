@@ -33,6 +33,8 @@ pub struct Strings {
     pub trigger: &'static str,
     pub hold_key: &'static str,
     pub disable_cmd_tab: &'static str,
+    pub quit_with_q: &'static str,
+    pub close_with_w: &'static str,
     pub overlay_hint: &'static str,
 
     pub permissions: &'static str,
@@ -84,7 +86,9 @@ const FR: Strings = Strings {
     trigger: "Déclencheur",
     hold_key: "Touche maintenue (puis Tab) :",
     disable_cmd_tab: "Désactiver le Cmd-Tab du système",
-    overlay_hint: "Pendant l'overlay : « m » change le mode · « q » quitte l'app · « , » réglages.",
+    quit_with_q: "Autoriser « q » à fermer l'app sélectionnée",
+    close_with_w: "Autoriser « w » à fermer la fenêtre sélectionnée",
+    overlay_hint: "Overlay : « m » mode · « w » ferme la fenêtre · « q » ferme l'app (si activé) · « , » réglages.",
 
     permissions: "Permissions",
     accessibility: "Accessibilité",
@@ -128,7 +132,9 @@ const EN: Strings = Strings {
     trigger: "Trigger",
     hold_key: "Hold key (then Tab):",
     disable_cmd_tab: "Disable the system Cmd-Tab",
-    overlay_hint: "While the overlay is open: \"m\" changes the mode · \"q\" quits the app · \",\" settings.",
+    quit_with_q: "Allow \"q\" to close the selected app",
+    close_with_w: "Allow \"w\" to close the selected window",
+    overlay_hint: "Overlay: \"m\" mode · \"w\" closes the window · \"q\" closes the app (if enabled) · \",\" settings.",
 
     permissions: "Permissions",
     accessibility: "Accessibility",

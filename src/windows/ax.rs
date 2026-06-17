@@ -32,6 +32,37 @@ pub fn window_id(element: &AXUIElement) -> Option<WindowId> {
     }
 }
 
+/// Ferme la fenêtre d'identifiant `id` de l'application `pid` en actionnant son
+/// bouton de fermeture (`AXCloseButton` → `AXPress`), sans quitter l'application.
+/// Retourne `true` si le bouton de fermeture a été trouvé et actionné.
+pub fn close_window(pid: i32, id: WindowId) -> bool {
+    let app = unsafe { AXUIElement::new_application(pid) };
+    let Some(array) = copy_attribute_array(&app, "AXWindows") else {
+        return false;
+    };
+
+    for i in 0..array.count() {
+        let ptr = unsafe { array.value_at_index(i) } as *const AXUIElement;
+        if ptr.is_null() {
+            continue;
+        }
+        let element = unsafe { &*ptr };
+        if window_id(element) != Some(id) {
+            continue;
+        }
+
+        let Some(button) = copy_attribute(element, "AXCloseButton") else {
+            return false;
+        };
+        // SAFETY: `AXCloseButton` renvoie un AXUIElement ; `button` (CFRetained)
+        // le maintient en vie le temps de l'action.
+        let button = unsafe { &*(&*button as *const CFType as *const AXUIElement) };
+        let press = CFString::from_static_str("AXPress");
+        return unsafe { button.perform_action(&press) } == AXError::Success;
+    }
+    false
+}
+
 /// Fenêtres de l'application `pid` (y compris minimisées), via l'Accessibilité.
 pub fn windows_for_pid(pid: i32) -> Vec<AxWindow> {
     let app = unsafe { AXUIElement::new_application(pid) };

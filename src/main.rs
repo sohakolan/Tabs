@@ -99,6 +99,8 @@ fn main() {
     // lancement au démarrage.
     hotkey::set_trigger_modifier(settings.trigger);
     hotkey::set_disable_native_cmd_tab(settings.disable_native_cmd_tab);
+    hotkey::set_quit_with_q(settings.quit_with_q);
+    hotkey::set_close_with_w(settings.close_with_w);
     login::set_launch_at_login(settings.launch_at_login);
 
     // Matérialise le fichier de réglages au premier lancement.

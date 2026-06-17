@@ -55,6 +55,12 @@ pub struct Settings {
     pub show_in_menu_bar: bool,
     /// Lancer Tabs automatiquement à l'ouverture de session.
     pub launch_at_login: bool,
+    /// Autoriser la touche « q » de l'overlay à fermer l'app sélectionnée
+    /// (désactivé par défaut, pour éviter les fermetures accidentelles).
+    pub quit_with_q: bool,
+    /// Autoriser la touche « w » de l'overlay à fermer la fenêtre sélectionnée
+    /// (activé par défaut ; non destructif, l'app reste ouverte).
+    pub close_with_w: bool,
     /// Langue de l'interface (français par défaut).
     pub language: Language,
 }
@@ -69,6 +75,8 @@ impl Default for Settings {
             show_in_dock: false,
             show_in_menu_bar: true,
             launch_at_login: false,
+            quit_with_q: false,
+            close_with_w: true,
             language: Language::Fr,
         }
     }

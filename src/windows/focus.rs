@@ -44,6 +44,12 @@ pub fn quit_app(pid: i32) {
     }
 }
 
+/// Identifiant de bundle (ex. `com.apple.finder`) de l'application `pid`.
+pub fn bundle_id(pid: i32) -> Option<String> {
+    let app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
+    Some(app.bundleIdentifier()?.to_string())
+}
+
 /// Cherche dans les fenêtres de l'application celle dont l'identifiant CG
 /// correspond, puis la lève et la marque comme principale.
 fn raise_matching_window(app: &AXUIElement, target: WindowId) -> bool {
