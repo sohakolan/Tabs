@@ -2,6 +2,8 @@
 
 mod layout;
 mod overlay;
+mod widgets;
 
-pub use layout::DisplayMode;
+pub use layout::{DisplayMode, Direction};
 pub use overlay::Overlay;
+pub(crate) use widgets::make_box;

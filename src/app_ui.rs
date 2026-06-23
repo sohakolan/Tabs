@@ -12,10 +12,10 @@ use objc2::runtime::{AnyObject, Sel};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSAutoresizingMaskOptions,
-    NSBackingStoreType, NSBox, NSBoxType, NSButton, NSCellImagePosition, NSColor,
+    NSBackingStoreType, NSBox, NSButton, NSCellImagePosition, NSColor,
     NSControlStateValueOn, NSFont, NSImage, NSImageScaling, NSImageView, NSMenu, NSMenuItem,
     NSPopUpButton, NSStatusBar, NSStatusItem, NSTabView, NSTabViewItem, NSTextAlignment,
-    NSTextField, NSTitlePosition, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
+    NSTextField, NSVariableStatusItemLength, NSView, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{
     MainThreadMarker, NSNotification, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
@@ -31,6 +31,15 @@ const WIN_H: f64 = 460.0;
 /// Taille utile d'un volet d'onglet (zone de contenu du NSTabView).
 const PANE_W: f64 = 470.0;
 const PANE_H: f64 = 340.0;
+
+/// Descripteur statique d'une tuile de mode (aperçu sélectionnable) du volet
+/// « Apparence » : mode visé, nom de l'image d'aperçu, libellé et action.
+struct Tile {
+    mode: DisplayMode,
+    image: &'static str,
+    title: &'static str,
+    action: Sel,
+}
 
 pub(crate) struct Ivars {
     mtm: MainThreadMarker,
@@ -93,10 +102,7 @@ define_class!(
         #[unsafe(method(scaleChanged:))]
         fn action_scale_changed(&self, sender: Option<&AnyObject>) {
             // L'index 0..=4 du menu correspond aux niveaux 1..=5.
-            let idx = sender
-                .and_then(|s| s.downcast_ref::<NSPopUpButton>())
-                .map(|p| p.indexOfSelectedItem())
-                .unwrap_or(2);
+            let idx = popup_index(sender, 2);
             let level = (idx as u8).saturating_add(1).clamp(1, 5);
             self.ivars().settings.borrow_mut().scale = level;
             self.save();
@@ -105,10 +111,7 @@ define_class!(
 
         #[unsafe(method(languageChanged:))]
         fn action_language_changed(&self, sender: Option<&AnyObject>) {
-            let idx = sender
-                .and_then(|s| s.downcast_ref::<NSPopUpButton>())
-                .map(|p| p.indexOfSelectedItem())
-                .unwrap_or(0);
+            let idx = popup_index(sender, 0);
             let lang = if idx == 1 { Language::En } else { Language::Fr };
             self.ivars().settings.borrow_mut().language = lang;
             self.save();
@@ -121,10 +124,7 @@ define_class!(
 
         #[unsafe(method(triggerChanged:))]
         fn action_trigger_changed(&self, sender: Option<&AnyObject>) {
-            let idx = sender
-                .and_then(|s| s.downcast_ref::<NSPopUpButton>())
-                .map(|p| p.indexOfSelectedItem())
-                .unwrap_or(0);
+            let idx = popup_index(sender, 0);
             let modifier = match idx {
                 1 => TriggerModifier::Command,
                 2 => TriggerModifier::Control,
@@ -506,15 +506,14 @@ impl AppController {
         let total = 3.0 * tile_w + 2.0 * gap;
         let start = (PANE_W - total) / 2.0;
         let ty = PANE_H - 40.0 - 134.0;
-        let modes = [
-            (DisplayMode::Thumbnails, "preview_thumbnails", t.mode_thumbnails, sel!(selectThumbnails:)),
-            (DisplayMode::AppIcons, "preview_appicons", t.mode_appicons, sel!(selectAppIcons:)),
-            (DisplayMode::Titles, "preview_titles", t.mode_titles, sel!(selectTitles:)),
+        let tiles = [
+            Tile { mode: DisplayMode::Thumbnails, image: "preview_thumbnails", title: t.mode_thumbnails, action: sel!(selectThumbnails:) },
+            Tile { mode: DisplayMode::AppIcons, image: "preview_appicons", title: t.mode_appicons, action: sel!(selectAppIcons:) },
+            Tile { mode: DisplayMode::Titles, image: "preview_titles", title: t.mode_titles, action: sel!(selectTitles:) },
         ];
-        for (i, (mode, image, label_text, action)) in modes.iter().enumerate() {
+        for (i, tile) in tiles.iter().enumerate() {
             let x = start + (i as f64) * (tile_w + gap);
-            self.add_tile(&pane, *mode, image, label_text, *action,
-                rect(x, ty, tile_w, 118.0), *mode == s.mode);
+            self.add_tile(tile, &pane, rect(x, ty, tile_w, 118.0), tile.mode == s.mode);
         }
 
         // Taille de l'overlay : 5 niveaux, le niveau 3 est la taille de base.
@@ -630,20 +629,11 @@ impl AppController {
 
     /// Ajoute une tuile d'aperçu sélectionnable (image + libellé) et enregistre
     /// sa boîte de surbrillance.
-    fn add_tile(
-        &self,
-        content: &NSView,
-        mode: DisplayMode,
-        image_name: &str,
-        title: &str,
-        action: Sel,
-        frame: NSRect,
-        selected: bool,
-    ) {
+    fn add_tile(&self, tile: &Tile, content: &NSView, frame: NSRect, selected: bool) {
         let mtm = self.ivars().mtm;
 
         // Carte derrière la tuile : fond léger + contour (accent si sélectionné).
-        let box_ = make_box(mtm, frame, 14.0);
+        let box_ = crate::ui::make_box(mtm, frame, 14.0);
         box_.setFillColor(&NSColor::colorWithCalibratedWhite_alpha(0.5, 0.08));
         apply_tile_border(&box_, selected);
         content.addSubview(&box_);
@@ -654,14 +644,14 @@ impl AppController {
             NSButton::buttonWithTitle_target_action(
                 &NSString::from_str(""),
                 Some(target),
-                Some(action),
+                Some(tile.action),
                 mtm,
             )
         };
         button.setBordered(false);
         button.setImagePosition(NSCellImagePosition::ImageOnly);
         button.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
-        if let Some(image) = NSImage::imageNamed(&NSString::from_str(image_name)) {
+        if let Some(image) = NSImage::imageNamed(&NSString::from_str(tile.image)) {
             button.setImage(Some(&image));
         }
         button.setFrame(rect(
@@ -674,13 +664,13 @@ impl AppController {
 
         let lbl = label(
             mtm,
-            title,
+            tile.title,
             rect(frame.origin.x, frame.origin.y + 4.0, frame.size.width, 18.0),
         );
-        lbl.setAlignment(objc2_app_kit::NSTextAlignment::Center);
+        lbl.setAlignment(NSTextAlignment::Center);
         content.addSubview(&lbl);
 
-        self.ivars().tiles.borrow_mut().push((mode, box_));
+        self.ivars().tiles.borrow_mut().push((tile.mode, box_));
     }
 
     /// Ajoute une ligne de permission : nom, statut, et bouton « Autoriser »
@@ -761,6 +751,14 @@ fn checkbox_is_on(sender: Option<&AnyObject>) -> bool {
         .unwrap_or(false)
 }
 
+/// Index sélectionné d'un `NSPopUpButton` émetteur, ou `default` si absent.
+fn popup_index(sender: Option<&AnyObject>, default: isize) -> isize {
+    sender
+        .and_then(|s| s.downcast_ref::<NSPopUpButton>())
+        .map(|p| p.indexOfSelectedItem())
+        .unwrap_or(default)
+}
+
 fn label(mtm: MainThreadMarker, text: &str, frame: NSRect) -> Retained<NSTextField> {
     let label = NSTextField::labelWithString(&NSString::from_str(text), mtm);
     label.setFrame(frame);
@@ -772,18 +770,6 @@ fn section(mtm: MainThreadMarker, text: &str, frame: NSRect) -> Retained<NSTextF
     label.setFont(Some(&NSFont::boldSystemFontOfSize(13.0)));
     label.setTextColor(Some(&NSColor::secondaryLabelColor()));
     label
-}
-
-fn make_box(mtm: MainThreadMarker, frame: NSRect, corner_radius: f64) -> Retained<NSBox> {
-    // SAFETY: init de NSBox.
-    let boxed: Retained<NSBox> = unsafe { msg_send![NSBox::alloc(mtm), init] };
-    boxed.setBoxType(NSBoxType::Custom);
-    boxed.setTitlePosition(NSTitlePosition::NoTitle);
-    boxed.setBorderWidth(0.0);
-    boxed.setFillColor(&NSColor::clearColor());
-    boxed.setCornerRadius(corner_radius);
-    boxed.setFrame(frame);
-    boxed
 }
 
 fn button(

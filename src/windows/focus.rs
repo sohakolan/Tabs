@@ -10,14 +10,22 @@
 //!
 //! Tout repose sur la permission d'Accessibilité.
 
-use core::ptr::{self, NonNull};
-
+use objc2::rc::Retained;
 use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
-use objc2_application_services::{AXError, AXUIElement};
-use objc2_core_foundation::{kCFBooleanFalse, kCFBooleanTrue, CFArray, CFRetained, CFString, CFType};
+use objc2_application_services::AXUIElement;
+use objc2_core_foundation::{kCFBooleanFalse, kCFBooleanTrue, CFString, CFType};
 
 use super::ax;
 use super::{Window, WindowId};
+
+/// Identifiant de bundle de Finder, toujours lancé mais souvent sans fenêtre.
+pub const FINDER_BUNDLE_ID: &str = "com.apple.finder";
+
+/// Application en cours d'exécution pour un `pid` (point d'accès unique aux
+/// recherches `NSRunningApplication`, factorisé pour tous les appelants).
+pub fn running_app(pid: i32) -> Option<Retained<NSRunningApplication>> {
+    NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+}
 
 /// Met la fenêtre `window` au premier plan et lui donne le focus.
 ///
@@ -28,8 +36,7 @@ pub fn activate(window: &Window) -> bool {
     let raised = raise_matching_window(&app, window.id);
 
     // Amène l'application au premier plan (toutes ses fenêtres).
-    if let Some(running) = NSRunningApplication::runningApplicationWithProcessIdentifier(window.pid)
-    {
+    if let Some(running) = running_app(window.pid) {
         running.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
     }
 
@@ -39,21 +46,29 @@ pub fn activate(window: &Window) -> bool {
 /// Demande la fermeture de l'application de PID `pid` (touche « q » : quitte
 /// l'application sélectionnée).
 pub fn quit_app(pid: i32) {
-    if let Some(app) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
+    if let Some(app) = running_app(pid) {
         app.terminate();
     }
 }
 
 /// Identifiant de bundle (ex. `com.apple.finder`) de l'application `pid`.
 pub fn bundle_id(pid: i32) -> Option<String> {
-    let app = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)?;
-    Some(app.bundleIdentifier()?.to_string())
+    Some(running_app(pid)?.bundleIdentifier()?.to_string())
+}
+
+/// L'application `pid` est-elle Finder ? Évite une `String` intermédiaire et
+/// centralise la comparaison (utilisée par l'énumération et par la touche « q »).
+pub fn is_finder(pid: i32) -> bool {
+    running_app(pid)
+        .and_then(|app| app.bundleIdentifier())
+        .is_some_and(|b| b.to_string() == FINDER_BUNDLE_ID)
 }
 
 /// Cherche dans les fenêtres de l'application celle dont l'identifiant CG
 /// correspond, puis la lève et la marque comme principale.
 fn raise_matching_window(app: &AXUIElement, target: WindowId) -> bool {
-    let Some(windows) = copy_windows(app) else {
+    let windows_attr = CFString::from_static_str("AXWindows");
+    let Some(windows) = ax::copy_attribute_array(app, &windows_attr) else {
         return false;
     };
 
@@ -89,21 +104,4 @@ fn raise_matching_window(app: &AXUIElement, target: WindowId) -> bool {
     }
 
     false
-}
-
-/// Récupère le tableau des fenêtres (`AXWindows`) de l'application.
-fn copy_windows(app: &AXUIElement) -> Option<CFRetained<CFArray>> {
-    let attribute = CFString::from_static_str("AXWindows");
-    let mut value: *const CFType = ptr::null();
-
-    // SAFETY: `value` est un pointeur de sortie valide ; en cas de succès il
-    // reçoit une valeur possédée (+1) que l'on confie à CFRetained.
-    let err = unsafe { app.copy_attribute_value(&attribute, NonNull::from(&mut value).cast()) };
-    if err != AXError::Success || value.is_null() {
-        return None;
-    }
-
-    // SAFETY: AXWindows renvoie un CFArray possédé ; CFRetained le libérera.
-    let array = unsafe { CFRetained::from_raw(NonNull::new_unchecked(value as *mut CFArray)) };
-    Some(array)
 }

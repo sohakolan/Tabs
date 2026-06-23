@@ -15,6 +15,12 @@ use super::WindowId;
 
 /// Capture une image de la fenêtre `id`, ou `None` si indisponible (permission
 /// d'Enregistrement de l'écran manquante, fenêtre hors écran, etc.).
+///
+/// `CGWindowListCreateImage` est une fonction CoreGraphics (pas AppKit),
+/// appelable hors du thread principal, et `CFRetained<CGImage>` est `Send` : la
+/// capture peut donc se faire sur un thread d'arrière-plan, l'image étant ensuite
+/// renvoyée au thread principal pour construire la `NSImage` (cf.
+/// `hotkey::kick_thumbnails`).
 pub fn capture(id: WindowId) -> Option<CFRetained<CGImage>> {
     // `CGRectNull` indique « utiliser les limites propres de la fenêtre ».
     let bounds = unsafe { CGRectNull };

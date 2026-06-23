@@ -1,6 +1,6 @@
 [package]
 name = "tabs"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2024"
 description = "Un commutateur de fenêtres pour macOS, libre et performant"
 license = "GPL-3.0-or-later"
@@ -11,6 +11,9 @@ rust-version = "1.85"
 [dependencies]
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
+# File d'attente principale GCD : livraison sur le thread principal des miniatures
+# capturées en arrière-plan (overlay instantané, remplissage progressif).
+dispatch2 = "0.3.1"
 objc2-application-services = { version = "0.3.2", features = ["libc"] }
 objc2-core-foundation = "0.3.2"
 objc2-core-graphics = "0.3.2"

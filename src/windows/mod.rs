@@ -54,23 +54,33 @@ pub fn list_windows() -> Vec<Window> {
     let apps = regular_apps(self_pid);
     let regular_pids: HashSet<i32> = apps.iter().map(|(pid, _)| *pid).collect();
 
+    // Fenêtres visibles d'abord (ordre z) : leur ensemble d'identifiants borne la
+    // lecture des titres AX, qu'on ne fait que pour les fenêtres réellement
+    // affichées (visibles ou minimisées).
+    let onscreen = onscreen_entries(&regular_pids, self_pid);
+    let onscreen_ids: HashSet<WindowId> = onscreen.iter().map(|(id, _, _)| *id).collect();
+
     // Fenêtres vues par l'Accessibilité (titre + état minimisé) par application.
-    let mut ax_windows: HashMap<i32, Vec<ax::AxWindow>> = HashMap::new();
+    let mut ax_windows: HashMap<i32, Vec<ax::AxWindow>> = HashMap::with_capacity(apps.len());
     for (pid, _) in &apps {
-        ax_windows.insert(*pid, ax::windows_for_pid(*pid));
+        ax_windows.insert(*pid, ax::windows_for_pid(*pid, &onscreen_ids));
     }
 
-    let mut out = Vec::new();
-    let mut seen: HashSet<WindowId> = HashSet::new();
+    let mut out = Vec::with_capacity(onscreen.len() + apps.len());
+    let mut seen: HashSet<WindowId> = HashSet::with_capacity(onscreen.len());
+    // Pids ayant déjà produit une fenêtre (phases 1 et 2) : sert à ne pas
+    // re-lister une app en entrée « sans fenêtre » à la phase 3.
+    let mut seen_pids: HashSet<i32> = HashSet::with_capacity(apps.len());
 
     // 1. Fenêtres visibles, dans l'ordre z de CGWindowList.
-    for (id, pid, app_name) in onscreen_entries(&regular_pids, self_pid) {
+    for (id, pid, app_name) in onscreen {
         let title = ax_windows
             .get(&pid)
             .and_then(|v| v.iter().find(|w| w.id == id))
             .map(|w| w.title.clone())
             .unwrap_or_default();
         seen.insert(id);
+        seen_pids.insert(pid);
         out.push(Window {
             id,
             pid,
@@ -85,6 +95,7 @@ pub fn list_windows() -> Vec<Window> {
         if let Some(windows) = ax_windows.get(pid) {
             for w in windows {
                 if w.minimized && seen.insert(w.id) {
+                    seen_pids.insert(*pid);
                     out.push(Window {
                         id: w.id,
                         pid: *pid,
@@ -101,15 +112,14 @@ pub fn list_windows() -> Vec<Window> {
     //    document). Comportement Cmd-Tab : on les liste quand même ; les activer
     //    les ramène au premier plan. Id synthétique (dérivé du pid, hors plage
     //    des vrais numéros CoreGraphics) pour éviter toute collision.
-    let represented: HashSet<i32> = out.iter().map(|w| w.pid).collect();
     for (pid, app_name) in &apps {
-        if represented.contains(pid) {
+        if seen_pids.contains(pid) {
             continue;
         }
         // Finder est toujours lancé mais le plus souvent sans fenêtre : on ne le
         // montre dans le sélecteur que s'il a une vraie fenêtre (sinon il
         // l'encombre en permanence).
-        if focus::bundle_id(*pid).as_deref() == Some("com.apple.finder") {
+        if focus::is_finder(*pid) {
             continue;
         }
         out.push(Window {
@@ -159,11 +169,12 @@ pub fn order_by_mru(windows: Vec<Window>, mru: &mut Vec<WindowId>) -> Vec<Window
         }
     }
 
-    *mru = order.clone();
-
-    // Réindexe les fenêtres selon `order`.
+    // Réindexe les fenêtres selon `order` (en l'empruntant), puis transfère
+    // `order` dans `mru` sans clone superflu.
     let mut by_id: HashMap<WindowId, Window> = windows.into_iter().map(|w| (w.id, w)).collect();
-    order.iter().filter_map(|id| by_id.remove(id)).collect()
+    let ordered = order.iter().filter_map(|id| by_id.remove(id)).collect();
+    *mru = order;
+    ordered
 }
 
 /// Applications « regular » en cours d'exécution (icône au Dock), hors la nôtre.

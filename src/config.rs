@@ -13,30 +13,20 @@ use serde::{Deserialize, Serialize};
 use crate::ui::DisplayMode;
 
 /// Modificateur maintenu pour déclencher et parcourir le sélecteur (+ Tab).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum TriggerModifier {
+    #[default]
     Option,
     Command,
     Control,
 }
 
-impl Default for TriggerModifier {
-    fn default() -> Self {
-        Self::Option
-    }
-}
-
 /// Langue de l'interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Language {
+    #[default]
     Fr,
     En,
-}
-
-impl Default for Language {
-    fn default() -> Self {
-        Self::Fr
-    }
 }
 
 /// Réglages de l'utilisateur.

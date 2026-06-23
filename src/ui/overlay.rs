@@ -14,16 +14,17 @@ use objc2::rc::Retained;
 use objc2::{define_class, msg_send, AllocAnyThread, DefinedClass, MainThreadOnly};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameDarkAqua, NSBackingStoreType, NSBox,
-    NSBoxType, NSColor, NSEvent, NSFont, NSImage, NSImageScaling,
-    NSImageView, NSPanel, NSPopUpMenuWindowLevel, NSRunningApplication, NSScreen, NSTextAlignment,
-    NSTextField, NSTitlePosition, NSTrackingArea, NSTrackingAreaOptions, NSView,
+    NSColor, NSEvent, NSFont, NSImage, NSImageScaling,
+    NSImageView, NSPanel, NSPopUpMenuWindowLevel, NSScreen, NSTextAlignment,
+    NSTextField, NSTrackingArea, NSTrackingAreaOptions, NSView,
     NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
     NSWindowCollectionBehavior, NSWindowStyleMask,
 };
+use objc2_core_graphics::CGImage;
 use objc2_foundation::{MainThreadMarker, NSArray, NSPoint, NSRect, NSSize, NSString};
 
-use super::layout::{self, DisplayMode, Rect};
-use crate::windows::{self, Window};
+use super::layout::{self, Direction, DisplayMode, Rect};
+use crate::windows::{self, Window, WindowId};
 
 /// Déplacement souris (en points) requis avant que le survol reprenne la main
 /// après l'ouverture de l'overlay. Évite qu'un curseur immobile sous l'overlay
@@ -189,6 +190,13 @@ pub struct Overlay {
     cells: Retained<NSView>,
     /// Rectangles de surbrillance par index, pour `select`.
     sel_frames: Vec<Rect>,
+    /// Génération de l'affichage, incrémentée à chaque `show`/`hide`. Une
+    /// miniature capturée en arrière-plan n'est posée que si la génération n'a
+    /// pas changé depuis le lancement de sa capture (sinon elle est périmée).
+    generation: Cell<u64>,
+    /// Vues d'image des cellules en mode Miniatures, indexées par id de fenêtre :
+    /// cibles du remplissage progressif (placeholder initial = icône d'app).
+    thumb_views: RefCell<Vec<(WindowId, Retained<NSImageView>)>>,
 }
 
 impl Overlay {
@@ -239,8 +247,8 @@ impl Overlay {
         let glass = make_glass(mtm, NSRect::ZERO);
         view.addSubview(&glass);
 
-        let sel_fill = NSColor::controlAccentColor().colorWithAlphaComponent(0.30);
-        let selection = make_box(mtm, NSRect::ZERO, &sel_fill, 10.0);
+        let selection = super::make_box(mtm, NSRect::ZERO, 10.0);
+        selection.setFillColor(&NSColor::controlAccentColor().colorWithAlphaComponent(0.30));
         selection.setHidden(true);
         view.addSubview(&selection);
 
@@ -255,6 +263,8 @@ impl Overlay {
             selection,
             cells,
             sel_frames: Vec::new(),
+            generation: Cell::new(0),
+            thumb_views: RefCell::new(Vec::new()),
         }
     }
 
@@ -265,11 +275,15 @@ impl Overlay {
     pub fn show(&mut self, windows: &[Window], selected: usize, mode: DisplayMode, scale: f64) {
         let mtm = self.mtm;
 
+        // Écran principal résolu une seule fois : sert à la fois à borner le repli
+        // (zone visible) et à centrer le panneau (cadre complet).
+        let screen = NSScreen::mainScreen(mtm);
+
         // Zone disponible (hors barre des menus et Dock) : borne le repli pour
         // que l'overlay reste entièrement à l'écran, même très agrandi.
-        let (max_w, max_h) = match NSScreen::mainScreen(mtm) {
-            Some(screen) => {
-                let vf = screen.visibleFrame();
+        let (max_w, max_h) = match &screen {
+            Some(s) => {
+                let vf = s.visibleFrame();
                 (vf.size.width * 0.96, vf.size.height * 0.92)
             }
             None => (1280.0, 800.0),
@@ -279,8 +293,8 @@ impl Overlay {
         // Dimensionne et centre le panneau sur l'écran principal.
         self.panel
             .setContentSize(NSSize::new(lay.width, lay.height));
-        if let Some(screen) = NSScreen::mainScreen(mtm) {
-            let f = screen.frame();
+        if let Some(s) = &screen {
+            let f = s.frame();
             let x = f.origin.x + (f.size.width - lay.width) / 2.0;
             let y = f.origin.y + (f.size.height - lay.height) / 2.0;
             self.panel.setFrameOrigin(NSPoint::new(x, y));
@@ -310,30 +324,51 @@ impl Overlay {
             None => self.selection.setHidden(true),
         }
 
+        // Nouvelle génération d'affichage : invalide les miniatures encore en vol
+        // pour l'affichage précédent, et réinitialise les cibles de remplissage.
+        self.generation.set(self.generation.get().wrapping_add(1));
+        let mut thumb_targets: Vec<(WindowId, Retained<NSImageView>)> = Vec::new();
+        let thumbnails = matches!(mode, DisplayMode::Thumbnails);
+
         // Reconstruit uniquement le conteneur des cellules.
         self.cells.setFrame(full);
         self.cells.setSubviews(&NSArray::new());
         let content = self.cells.clone();
 
-        // Cellules : aperçu (selon le mode) + titre.
+        // Icônes d'application mémoïsées par pid pour la durée de ce `show` :
+        // plusieurs fenêtres d'une même app partagent une seule résolution, et le
+        // mode Miniatures réutilise la même icône pour l'aperçu et la pastille.
+        let mut icon_cache: Vec<(i32, Option<Retained<NSImage>>)> = Vec::new();
+        let mut icon_for = |pid: i32| -> Option<Retained<NSImage>> {
+            if let Some((_, icon)) = icon_cache.iter().find(|(p, _)| *p == pid) {
+                return icon.clone();
+            }
+            let icon = app_icon_for_pid(pid);
+            icon_cache.push((pid, icon.clone()));
+            icon
+        };
+
+        // Cellules : aperçu + titre. L'aperçu est posé tout de suite avec l'icône
+        // d'application (rendu instantané) ; en mode Miniatures, la vraie miniature
+        // remplacera cette icône dès qu'elle est capturée en arrière-plan
+        // (cf. `set_thumbnail` et `hotkey::kick_thumbnails`).
         for (i, w) in windows.iter().enumerate() {
             let cf = lay.cells[i];
 
-            let image = match mode {
-                DisplayMode::Titles => app_icon(w),
-                DisplayMode::AppIcons => app_icon(w),
-                DisplayMode::Thumbnails => thumbnail_or_icon(w),
-            };
-            if let Some(image) = image {
+            if let Some(image) = icon_for(w.pid) {
                 let view = NSImageView::imageViewWithImage(&image, mtm);
                 view.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
                 view.setFrame(to_nsrect(cf.image));
                 content.addSubview(&view);
+                // Cellule susceptible de recevoir une miniature : on garde sa vue.
+                if thumbnails {
+                    thumb_targets.push((w.id, view));
+                }
             }
 
             // Pastille d'icône d'app posée sur la miniature (mode Thumbnails).
             if cf.badge.w > 0.0 {
-                if let Some(icon) = app_icon(w) {
+                if let Some(icon) = icon_for(w.pid) {
                     let badge = NSImageView::imageViewWithImage(&icon, mtm);
                     badge.setImageScaling(NSImageScaling::ScaleProportionallyUpOrDown);
                     badge.setFrame(to_nsrect(cf.badge));
@@ -346,13 +381,13 @@ impl Overlay {
             } else {
                 w.title.as_str()
             };
-            // Préfixe « replié » pour les fenêtres minimisées.
-            let text = if w.minimized {
-                format!("⤓ {base}")
+            // Préfixe « replié » pour les fenêtres minimisées ; on n'alloue de
+            // chaîne que dans ce cas (le cas courant passe le `&str` directement).
+            let label = if w.minimized {
+                NSTextField::labelWithString(&NSString::from_str(&format!("⤓ {base}")), mtm)
             } else {
-                base.to_string()
+                NSTextField::labelWithString(&NSString::from_str(base), mtm)
             };
-            let label = NSTextField::labelWithString(&NSString::from_str(&text), mtm);
             label.setAlignment(if matches!(mode, DisplayMode::Titles) {
                 NSTextAlignment::Left
             } else {
@@ -369,8 +404,38 @@ impl Overlay {
             content.addSubview(&label);
         }
 
+        *self.thumb_views.borrow_mut() = thumb_targets;
+
         // Affiche sans voler le focus à l'application active.
         self.panel.orderFrontRegardless();
+    }
+
+    /// Génération d'affichage courante (cf. [`Overlay::set_thumbnail`]).
+    pub fn generation(&self) -> u64 {
+        self.generation.get()
+    }
+
+    /// Remplace l'icône-placeholder d'une cellule par la miniature `image` de la
+    /// fenêtre `id`, si l'affichage est toujours de la génération `generation`
+    /// (sinon la capture est périmée et on l'ignore). Appelé sur le thread
+    /// principal depuis la livraison des captures faites en arrière-plan.
+    pub fn set_thumbnail(&self, generation: u64, id: WindowId, image: &CGImage) {
+        if generation != self.generation.get() {
+            return;
+        }
+        let targets = self.thumb_views.borrow();
+        if let Some((_, view)) = targets.iter().find(|(wid, _)| *wid == id) {
+            // NSSize(0,0) → l'image garde sa taille en pixels ; l'NSImageView la
+            // met à l'échelle dans son cadre.
+            let ns = NSImage::initWithCGImage_size(NSImage::alloc(), image, NSSize::new(0.0, 0.0));
+            view.setImage(Some(&ns));
+        }
+    }
+
+    /// Index de la cellule voisine de `from` dans la direction `dir` (navigation
+    /// aux flèches), ou `None` au bord de la grille.
+    pub fn neighbor(&self, from: usize, dir: Direction) -> Option<usize> {
+        layout::neighbor(&self.sel_frames, from, dir)
     }
 
     /// Déplace la surbrillance sur l'élément `selected` (overlay déjà visible).
@@ -381,8 +446,11 @@ impl Overlay {
         }
     }
 
-    /// Masque l'overlay.
+    /// Masque l'overlay. Incrémente la génération pour qu'aucune miniature encore
+    /// en vol ne vienne se poser sur un affichage refermé.
     pub fn hide(&self) {
+        self.generation.set(self.generation.get().wrapping_add(1));
+        self.thumb_views.borrow_mut().clear();
         self.panel.orderOut(None);
     }
 
@@ -399,24 +467,9 @@ impl Overlay {
     }
 }
 
-/// Renvoie l'aperçu d'une fenêtre : sa miniature si la capture est possible,
-/// sinon l'icône de son application.
-fn thumbnail_or_icon(w: &Window) -> Option<Retained<NSImage>> {
-    if let Some(cg) = windows::capture::capture(w.id) {
-        // NSSize(0,0) → l'image conserve sa taille en pixels, l'NSImageView
-        // la met ensuite à l'échelle dans son cadre.
-        return Some(NSImage::initWithCGImage_size(
-            NSImage::alloc(),
-            &cg,
-            NSSize::new(0.0, 0.0),
-        ));
-    }
-    app_icon(w)
-}
-
-/// Icône de l'application propriétaire de la fenêtre.
-fn app_icon(w: &Window) -> Option<Retained<NSImage>> {
-    NSRunningApplication::runningApplicationWithProcessIdentifier(w.pid)?.icon()
+/// Icône de l'application de PID `pid`, le cas échéant.
+fn app_icon_for_pid(pid: i32) -> Option<Retained<NSImage>> {
+    windows::focus::running_app(pid)?.icon()
 }
 
 /// Convertit un [`Rect`] de disposition en `NSRect`.
@@ -438,22 +491,4 @@ fn make_glass(mtm: MainThreadMarker, frame: NSRect) -> Retained<NSVisualEffectVi
         layer.setMasksToBounds(true);
     }
     view
-}
-
-/// Crée une `NSBox` sans titre ni bordure, au fond plein et aux coins arrondis.
-fn make_box(
-    mtm: MainThreadMarker,
-    frame: NSRect,
-    fill: &NSColor,
-    corner_radius: f64,
-) -> Retained<NSBox> {
-    // SAFETY: `init` est la méthode d'initialisation correcte de NSBox.
-    let boxed: Retained<NSBox> = unsafe { msg_send![NSBox::alloc(mtm), init] };
-    boxed.setBoxType(NSBoxType::Custom);
-    boxed.setTitlePosition(NSTitlePosition::NoTitle);
-    boxed.setBorderWidth(0.0);
-    boxed.setFillColor(fill);
-    boxed.setCornerRadius(corner_radius);
-    boxed.setFrame(frame);
-    boxed
 }

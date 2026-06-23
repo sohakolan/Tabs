@@ -40,6 +40,64 @@ pub struct Rect {
     pub h: f64,
 }
 
+/// Direction de navigation au clavier (flèches).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+/// Index de la cellule voisine de `from` dans la direction `dir`, ou `None` s'il
+/// n'y en a pas (bord de la grille). Purement géométrique sur les rectangles de
+/// cellule : fonctionne pour la grille horizontale comme pour la liste verticale,
+/// quel que soit l'ordre de remplissage, et borne aux bords (pas d'enroulement).
+///
+/// On ne retient que les cellules réellement situées dans la direction demandée,
+/// puis on choisit la plus proche en pénalisant le décalage sur l'axe transverse
+/// (pour rester dans la même rangée/colonne quand c'est possible).
+pub fn neighbor(rects: &[Rect], from: usize, dir: Direction) -> Option<usize> {
+    let cur = rects.get(from)?;
+    let cx = cur.x + cur.w / 2.0;
+    let cy = cur.y + cur.h / 2.0;
+
+    // Poids du décalage transverse : assez grand pour préférer l'alignement.
+    const CROSS_WEIGHT: f64 = 3.0;
+    // Seuil minimal de progression dans la direction (anti-bruit).
+    const EPS: f64 = 0.5;
+
+    let mut best: Option<usize> = None;
+    let mut best_score = f64::INFINITY;
+    for (i, r) in rects.iter().enumerate() {
+        if i == from {
+            continue;
+        }
+        let rx = r.x + r.w / 2.0;
+        let ry = r.y + r.h / 2.0;
+        let dx = rx - cx;
+        let dy = ry - cy;
+        // `primary` = avancée dans la direction voulue (doit être > 0) ;
+        // `cross` = écart sur l'axe perpendiculaire (en valeur absolue).
+        // Note : en coordonnées AppKit, l'axe Y monte (haut = y plus grand).
+        let (primary, cross) = match dir {
+            Direction::Left => (-dx, dy.abs()),
+            Direction::Right => (dx, dy.abs()),
+            Direction::Up => (dy, dx.abs()),
+            Direction::Down => (-dy, dx.abs()),
+        };
+        if primary <= EPS {
+            continue;
+        }
+        let score = primary + cross * CROSS_WEIGHT;
+        if score < best_score {
+            best_score = score;
+            best = Some(i);
+        }
+    }
+    best
+}
+
 /// Frames calculés pour une cellule (une fenêtre).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellFrame {
@@ -64,11 +122,11 @@ pub struct Layout {
 }
 
 /// Marge extérieure du panneau (à l'échelle 1.0).
-pub const PAD: f64 = 18.0;
+const PAD: f64 = 18.0;
 /// Espace vertical entre l'aperçu et le titre (à l'échelle 1.0).
-pub const GAP: f64 = 6.0;
+const GAP: f64 = 6.0;
 /// Hauteur de la zone de titre (à l'échelle 1.0).
-pub const TITLE_H: f64 = 16.0;
+const TITLE_H: f64 = 16.0;
 
 /// Métriques dépendant du mode (déjà mises à l'échelle).
 struct Metrics {
@@ -373,6 +431,47 @@ mod tests {
         let l = compute(12, DisplayMode::Titles, 1.0, BIG_W, max_h);
         assert!(l.height <= max_h + 0.001, "la liste déborde : {}", l.height);
         assert!(l.width > compute1(12, DisplayMode::Titles).width);
+    }
+
+    /// Rectangles de sélection d'une disposition (les cibles de navigation).
+    fn sel_rects(l: &Layout) -> Vec<Rect> {
+        l.cells.iter().map(|c| c.selection).collect()
+    }
+
+    #[test]
+    fn fleches_dans_une_grille_2x3() {
+        // 6 miniatures, largeur limitée à ~3 colonnes → 2 rangées de 3.
+        // Indices : rangée 0 = 0,1,2 (haut) ; rangée 1 = 3,4,5 (bas).
+        let l = compute(6, DisplayMode::Thumbnails, 1.0, 600.0, BIG_H);
+        let r = sel_rects(&l);
+        assert_eq!(neighbor(&r, 0, Direction::Right), Some(1));
+        assert_eq!(neighbor(&r, 1, Direction::Left), Some(0));
+        assert_eq!(neighbor(&r, 0, Direction::Down), Some(3));
+        assert_eq!(neighbor(&r, 4, Direction::Up), Some(1));
+        // Bords : pas d'enroulement.
+        assert_eq!(neighbor(&r, 0, Direction::Left), None);
+        assert_eq!(neighbor(&r, 0, Direction::Up), None);
+        assert_eq!(neighbor(&r, 2, Direction::Right), None);
+        assert_eq!(neighbor(&r, 5, Direction::Down), None);
+    }
+
+    #[test]
+    fn fleches_dans_une_liste_de_titres() {
+        // Liste verticale d'une seule colonne : Bas/Haut naviguent, pas Gauche/Droite.
+        let l = compute(4, DisplayMode::Titles, 1.0, BIG_W, BIG_H);
+        let r = sel_rects(&l);
+        assert_eq!(neighbor(&r, 0, Direction::Down), Some(1));
+        assert_eq!(neighbor(&r, 2, Direction::Up), Some(1));
+        assert_eq!(neighbor(&r, 0, Direction::Up), None);
+        assert_eq!(neighbor(&r, 3, Direction::Down), None);
+        assert_eq!(neighbor(&r, 0, Direction::Right), None);
+    }
+
+    #[test]
+    fn fleches_index_hors_borne() {
+        let l = compute(3, DisplayMode::AppIcons, 1.0, BIG_W, BIG_H);
+        let r = sel_rects(&l);
+        assert_eq!(neighbor(&r, 9, Direction::Right), None);
     }
 
     #[test]

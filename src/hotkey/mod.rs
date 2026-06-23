@@ -13,19 +13,20 @@ mod state;
 pub use state::{Action, Input, Switcher};
 
 use crate::config::TriggerModifier;
-use crate::ui::{DisplayMode, Overlay};
+use crate::ui::{Direction, DisplayMode, Overlay};
 use crate::windows::{self, Window, WindowId};
 
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 use std::cell::RefCell;
 
+use dispatch2::DispatchQueue;
 use objc2_app_kit::NSEvent;
 use objc2_core_foundation::{kCFRunLoopCommonModes, CFMachPort, CFRetained, CFRunLoop};
 use objc2_foundation::MainThreadMarker;
 use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-    CGEventTapProxy, CGEventType,
+    CGEventTapProxy, CGEventType, CGImage,
 };
 
 // Tab et Échap se repèrent par leur keycode physique (identique sur tous les
@@ -36,6 +37,11 @@ use objc2_core_graphics::{
 const KEYCODE_TAB: i64 = 0x30;
 /// Code de touche virtuelle macOS pour Échap.
 const KEYCODE_ESCAPE: i64 = 0x35;
+// Flèches directionnelles (keycodes physiques, indépendants de l'agencement).
+const KEYCODE_LEFT: i64 = 0x7B;
+const KEYCODE_RIGHT: i64 = 0x7C;
+const KEYCODE_DOWN: i64 = 0x7D;
+const KEYCODE_UP: i64 = 0x7E;
 
 /// Masque des évènements écoutés : keyDown (10) | keyUp (11) | flagsChanged (12).
 const EVENT_MASK: u64 = (1 << 10) | (1 << 11) | (1 << 12);
@@ -67,8 +73,6 @@ struct TapState {
     /// Autorise la touche « w » à fermer la fenêtre sélectionnée (activé par
     /// défaut).
     close_with_w: bool,
-    /// Rappel pour ouvrir la fenêtre de préférences (touche `,`).
-    on_open_prefs: Box<dyn Fn()>,
     /// Conservé pour pouvoir réactiver le tap s'il est désactivé par le système.
     port: Option<CFRetained<CFMachPort>>,
 }
@@ -84,9 +88,13 @@ thread_local! {
         quit_with_q: false,
         close_with_w: true,
         overlay: None,
-        on_open_prefs: Box::new(|| {}),
         port: None,
     });
+
+    /// Rappel d'ouverture des préférences (touche `,`). Hors de [`TapState`] :
+    /// on l'invoque ainsi sans tenir l'emprunt de `STATE`, ce qui laisse le
+    /// rappel ré-entrer librement les réglages (set_mode, set_scale…).
+    static ON_OPEN_PREFS: RefCell<Box<dyn Fn()>> = RefCell::new(Box::new(|| {}));
 }
 
 /// Prépare le sélecteur (overlay + rappels) puis tente d'installer le tap
@@ -106,8 +114,8 @@ pub fn install(initial_mode: DisplayMode, on_open_prefs: Box<dyn Fn()>) -> bool 
         let mut st = s.borrow_mut();
         st.overlay = Some(overlay);
         st.mode = initial_mode;
-        st.on_open_prefs = on_open_prefs;
     });
+    ON_OPEN_PREFS.with(|cb| *cb.borrow_mut() = on_open_prefs);
 
     if ensure_tap_installed() {
         true
@@ -215,6 +223,7 @@ unsafe extern "C-unwind" fn tap_callback(
             }
             match classify(ev) {
                 Some(Shortcut::Tab) if trigger_held => on_tab(shift_held),
+                Some(Shortcut::Arrow(dir)) if is_active() => on_arrow(dir),
                 Some(Shortcut::Escape) if is_active() => dispatch(Input::Escape),
                 Some(Shortcut::CycleMode) if is_active() => cycle_mode(),
                 Some(Shortcut::Quit) if is_active() => quit_selected_app(),
@@ -246,6 +255,7 @@ unsafe extern "C-unwind" fn tap_callback(
 /// Raccourci clavier reconnu par le sélecteur.
 enum Shortcut {
     Tab,
+    Arrow(Direction),
     Escape,
     CycleMode,
     Quit,
@@ -261,6 +271,10 @@ fn classify(ev: &CGEvent) -> Option<Shortcut> {
     match keycode(ev) {
         KEYCODE_TAB => Some(Shortcut::Tab),
         KEYCODE_ESCAPE => Some(Shortcut::Escape),
+        KEYCODE_LEFT => Some(Shortcut::Arrow(Direction::Left)),
+        KEYCODE_RIGHT => Some(Shortcut::Arrow(Direction::Right)),
+        KEYCODE_UP => Some(Shortcut::Arrow(Direction::Up)),
+        KEYCODE_DOWN => Some(Shortcut::Arrow(Direction::Down)),
         _ => match typed_char(ev)? {
             'm' => Some(Shortcut::CycleMode),
             'q' => Some(Shortcut::Quit),
@@ -306,6 +320,59 @@ fn on_tab(shift: bool) {
 fn dispatch(input: Input) {
     let action = STATE.with(|s| s.borrow_mut().switcher.on_input(input));
     perform(action);
+}
+
+/// Déplace la sélection vers la cellule voisine (flèche `dir`) en s'appuyant sur
+/// la géométrie de la grille calculée par l'overlay. Sans effet au bord.
+fn on_arrow(dir: Direction) {
+    let target = STATE.with(|s| {
+        let st = s.borrow();
+        if !st.switcher.is_active() {
+            return None;
+        }
+        let current = st.switcher.selected();
+        st.overlay.as_ref().and_then(|o| o.neighbor(current, dir))
+    });
+    if let Some(index) = target {
+        dispatch(Input::Point { index });
+    }
+}
+
+/// Lance, sur un thread d'arrière-plan, la capture des miniatures des fenêtres
+/// affichées et les livre une à une au thread principal : l'overlay apparaît
+/// instantanément (icônes d'application), puis chaque miniature remplace son
+/// icône dès qu'elle est prête. Sans effet hors mode Miniatures.
+fn kick_thumbnails(st: &TapState) {
+    if !matches!(st.mode, DisplayMode::Thumbnails) {
+        return;
+    }
+    let Some(overlay) = st.overlay.as_ref() else {
+        return;
+    };
+    let generation = overlay.generation();
+    let ids: Vec<WindowId> = st.windows.iter().map(|w| w.id).collect();
+    if ids.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        for id in ids {
+            if let Some(image) = windows::capture::capture(id) {
+                // Livraison sur le thread principal (objets AppKit). La capture
+                // périmée (génération obsolète) sera ignorée à l'arrivée.
+                DispatchQueue::main()
+                    .exec_async(move || deliver_thumbnail(generation, id, image));
+            }
+        }
+    });
+}
+
+/// Pose une miniature capturée sur sa cellule (thread principal).
+fn deliver_thumbnail(generation: u64, id: WindowId, image: CFRetained<CGImage>) {
+    STATE.with(|s| {
+        if let Some(overlay) = s.borrow().overlay.as_ref() {
+            overlay.set_thumbnail(generation, id, &image);
+        }
+    });
 }
 
 /// Quitte l'application de la fenêtre sélectionnée (touche « q ») et met à jour
@@ -356,20 +423,26 @@ fn close_selected_window() {
     });
 }
 
-/// Après retrait de fenêtres : recalcule la sélection et rafraîchit l'overlay
-/// (ou le masque s'il ne reste rien).
-fn refresh_after_removal(st: &mut TapState) {
-    let count = st.windows.len();
-    st.switcher.refresh(count);
-
-    let selected = st.switcher.selected();
-    let active = st.switcher.is_active();
-    if let Some(overlay) = st.overlay.as_mut() {
-        if active && count > 0 {
+/// Redessine l'overlay s'il est actif, avec la sélection, le mode et l'échelle
+/// courants. Motif partagé par les changements de mode/échelle et les retraits.
+fn redraw_if_active(st: &mut TapState) {
+    if st.switcher.is_active() {
+        let selected = st.switcher.selected();
+        if let Some(overlay) = st.overlay.as_mut() {
             overlay.show(&st.windows, selected, st.mode, st.scale);
-        } else {
-            overlay.hide();
         }
+        kick_thumbnails(st);
+    }
+}
+
+/// Après retrait de fenêtres : recalcule la sélection et rafraîchit l'overlay
+/// (ou le masque s'il ne reste rien — `refresh` désactive le cycle si vide).
+fn refresh_after_removal(st: &mut TapState) {
+    st.switcher.refresh(st.windows.len());
+    if st.switcher.is_active() {
+        redraw_if_active(st);
+    } else if let Some(overlay) = st.overlay.as_mut() {
+        overlay.hide();
     }
 }
 
@@ -398,13 +471,7 @@ pub fn set_scale(level: u8) {
     STATE.with(|s| {
         let mut st = s.borrow_mut();
         st.scale = crate::config::scale_factor(level);
-        if st.switcher.is_active() {
-            let selected = st.switcher.selected();
-            let st = &mut *st;
-            if let Some(overlay) = st.overlay.as_mut() {
-                overlay.show(&st.windows, selected, st.mode, st.scale);
-            }
-        }
+        redraw_if_active(&mut st);
     });
 }
 
@@ -416,10 +483,11 @@ fn modifier_flag(modifier: TriggerModifier) -> CGEventFlags {
     }
 }
 
-/// Ouvre les préférences (touche `,`) : ferme d'abord l'overlay.
+/// Ouvre les préférences (touche `,`) : ferme d'abord l'overlay. Le rappel est
+/// invoqué hors de tout emprunt de `STATE` (cf. [`ON_OPEN_PREFS`]).
 fn open_prefs() {
     dispatch(Input::Escape);
-    STATE.with(|s| (s.borrow().on_open_prefs)());
+    ON_OPEN_PREFS.with(|cb| (cb.borrow())());
 }
 
 /// Change le mode d'affichage depuis l'extérieur (préférences) et redessine
@@ -428,13 +496,7 @@ pub fn set_mode(mode: DisplayMode) {
     STATE.with(|s| {
         let mut st = s.borrow_mut();
         st.mode = mode;
-        if st.switcher.is_active() {
-            let selected = st.switcher.selected();
-            let st = &mut *st;
-            if let Some(overlay) = st.overlay.as_mut() {
-                overlay.show(&st.windows, selected, mode, st.scale);
-            }
-        }
+        redraw_if_active(&mut st);
     });
 }
 
@@ -457,11 +519,7 @@ fn cycle_mode() {
             return;
         }
         st.mode = st.mode.next();
-        let selected = st.switcher.selected();
-        let st = &mut *st;
-        if let Some(overlay) = st.overlay.as_mut() {
-            overlay.show(&st.windows, selected, st.mode, st.scale);
-        }
+        redraw_if_active(&mut st);
     });
 }
 
@@ -470,25 +528,47 @@ fn cycle_mode() {
 /// M3 affiche/masque l'overlay et déplace la surbrillance ; M4 ajoutera
 /// l'activation réelle de la fenêtre validée.
 fn perform(action: Action) {
-    STATE.with(|s| {
+    // Pour `Commit`, on extrait la fenêtre à activer pendant l'emprunt, puis on
+    // l'active APRÈS l'avoir relâché : `focus::activate` enchaîne des appels AX et
+    // d'activation synchrones qu'il ne faut pas exécuter en tenant l'emprunt de
+    // `STATE` (réentrance possible via la run loop / les rappels souris).
+    let to_activate = STATE.with(|s| {
         let mut st = s.borrow_mut();
         let st = &mut *st;
-        let Some(overlay) = st.overlay.as_mut() else {
-            return;
-        };
         match action {
-            Action::Show { selected } => overlay.show(&st.windows, selected, st.mode, st.scale),
-            Action::Select { selected } => overlay.select(selected),
-            Action::Commit { selected } => {
-                overlay.hide();
-                if let Some(w) = st.windows.get(selected) {
-                    let raised = windows::focus::activate(w);
-                    let how = if raised { "fenêtre levée" } else { "app activée" };
-                    println!("[Tabs] ✓ {} [id {}] ({how})", w.app_name, w.id);
+            Action::Show { selected } => {
+                if let Some(overlay) = st.overlay.as_mut() {
+                    overlay.show(&st.windows, selected, st.mode, st.scale);
                 }
+                // Overlay affiché tout de suite ; les miniatures arrivent ensuite.
+                kick_thumbnails(st);
+                None
             }
-            Action::Cancel => overlay.hide(),
-            Action::None => {}
+            Action::Select { selected } => {
+                if let Some(overlay) = st.overlay.as_mut() {
+                    overlay.select(selected);
+                }
+                None
+            }
+            Action::Commit { selected } => {
+                if let Some(overlay) = st.overlay.as_mut() {
+                    overlay.hide();
+                }
+                st.windows.get(selected).cloned()
+            }
+            Action::Cancel => {
+                if let Some(overlay) = st.overlay.as_mut() {
+                    overlay.hide();
+                }
+                None
+            }
+            Action::None => None,
         }
     });
+
+    if let Some(w) = to_activate {
+        let raised = windows::focus::activate(&w);
+        let how = if raised { "fenêtre levée" } else { "app activée" };
+        println!("[Tabs] ✓ {} [id {}] ({how})", w.app_name, w.id);
+    }
 }
