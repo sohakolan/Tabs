@@ -63,6 +63,21 @@ pub struct Settings {
     pub close_with_w: bool,
     /// Langue de l'interface (français par défaut).
     pub language: Language,
+    /// Taille de l'overlay : niveau 1 (compact) à 5 (grand). Le niveau 3 est la
+    /// taille de base (facteur 1.0).
+    pub scale: u8,
+}
+
+/// Facteur d'échelle appliqué à l'overlay pour un niveau `1..=5`. Le niveau 3
+/// (par défaut) vaut 1.0 ; les autres niveaux réduisent ou agrandissent tout.
+pub fn scale_factor(level: u8) -> f64 {
+    match level.clamp(1, 5) {
+        1 => 0.72,
+        2 => 0.85,
+        3 => 1.0,
+        4 => 1.2,
+        _ => 1.45,
+    }
 }
 
 impl Default for Settings {
@@ -78,6 +93,8 @@ impl Default for Settings {
             quit_with_q: false,
             close_with_w: true,
             language: Language::Fr,
+            // Niveau 3 = taille de base.
+            scale: 3,
         }
     }
 }

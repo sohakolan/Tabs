@@ -57,7 +57,7 @@ fn main() {
         let wins = windows::list_windows();
         let selected = if wins.len() > 1 { 1 } else { 0 };
         println!("[Tabs] --demo : {} fenêtre(s), sélection {selected}", wins.len());
-        overlay.show(&wins, selected, ui::DisplayMode::Thumbnails);
+        overlay.show(&wins, selected, ui::DisplayMode::Thumbnails, 1.0);
         // L'overlay doit rester en vie pendant la boucle d'évènements.
         std::mem::forget(overlay);
         app.run();
@@ -101,6 +101,7 @@ fn main() {
     hotkey::set_disable_native_cmd_tab(settings.disable_native_cmd_tab);
     hotkey::set_quit_with_q(settings.quit_with_q);
     hotkey::set_close_with_w(settings.close_with_w);
+    hotkey::set_scale(settings.scale);
     login::set_launch_at_login(settings.launch_at_login);
 
     // Matérialise le fichier de réglages au premier lancement.

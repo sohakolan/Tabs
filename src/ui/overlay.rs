@@ -179,8 +179,14 @@ pub struct Overlay {
     panel: Retained<NSPanel>,
     /// Vue de contenu personnalisée (reçoit les évènements souris).
     view: Retained<OverlayView>,
-    /// Boîte de surbrillance, recréée à chaque `show`.
-    selection: Option<Retained<NSBox>>,
+    /// Fond en verre dépoli, persistant entre les ouvertures (sa recréation à
+    /// chaque `show` était coûteuse et provoquait une latence visible).
+    glass: Retained<NSVisualEffectView>,
+    /// Boîte de surbrillance, persistante : on ne fait que la repositionner.
+    selection: Retained<NSBox>,
+    /// Conteneur des cellules, persistant : seules ses sous-vues sont
+    /// reconstruites à chaque `show` (le verre et la surbrillance, eux, restent).
+    cells: Retained<NSView>,
     /// Rectangles de surbrillance par index, pour `select`.
     sel_frames: Vec<Rect>,
 }
@@ -227,20 +233,48 @@ impl Overlay {
         let view = OverlayView::new(mtm, on_hover, on_click);
         panel.setContentView(Some(&view));
 
+        // Pile persistante : verre (au fond), surbrillance, puis conteneur des
+        // cellules (au-dessus). Recréer ces vues à chaque ouverture coûtait cher
+        // (le NSVisualEffectView surtout) ; on les garde et on les réutilise.
+        let glass = make_glass(mtm, NSRect::ZERO);
+        view.addSubview(&glass);
+
+        let sel_fill = NSColor::controlAccentColor().colorWithAlphaComponent(0.30);
+        let selection = make_box(mtm, NSRect::ZERO, &sel_fill, 10.0);
+        selection.setHidden(true);
+        view.addSubview(&selection);
+
+        let cells = NSView::initWithFrame(NSView::alloc(mtm), NSRect::ZERO);
+        view.addSubview(&cells);
+
         Self {
             mtm,
             panel,
             view,
-            selection: None,
+            glass,
+            selection,
+            cells,
             sel_frames: Vec::new(),
         }
     }
 
     /// Affiche l'overlay pour `windows`, avec l'élément `selected` en évidence,
-    /// dans le mode d'affichage demandé.
-    pub fn show(&mut self, windows: &[Window], selected: usize, mode: DisplayMode) {
+    /// dans le mode d'affichage demandé et à l'échelle `scale` (1.0 = base). Les
+    /// éléments sont repliés sur plusieurs rangées/colonnes pour ne jamais
+    /// déborder de l'écran visible.
+    pub fn show(&mut self, windows: &[Window], selected: usize, mode: DisplayMode, scale: f64) {
         let mtm = self.mtm;
-        let lay = layout::compute(windows.len(), mode);
+
+        // Zone disponible (hors barre des menus et Dock) : borne le repli pour
+        // que l'overlay reste entièrement à l'écran, même très agrandi.
+        let (max_w, max_h) = match NSScreen::mainScreen(mtm) {
+            Some(screen) => {
+                let vf = screen.visibleFrame();
+                (vf.size.width * 0.96, vf.size.height * 0.92)
+            }
+            None => (1280.0, 800.0),
+        };
+        let lay = layout::compute(windows.len(), mode, scale, max_w, max_h);
 
         // Dimensionne et centre le panneau sur l'écran principal.
         self.panel
@@ -252,32 +286,34 @@ impl Overlay {
             self.panel.setFrameOrigin(NSPoint::new(x, y));
         }
 
-        let content = self.view.clone();
+        let full = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(lay.width, lay.height));
 
         // Renseigne les zones cliquables/survolables pour la souris.
         self.view
             .set_cells(lay.cells.iter().map(|c| to_nsrect(c.hit)).collect());
 
-        // Repart d'une vue vide.
-        content.setSubviews(&NSArray::new());
-
-        // Fond en verre dépoli (glassmorphisme) à coins arrondis.
-        let glass = make_glass(
-            mtm,
-            NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(lay.width, lay.height)),
-        );
-        content.addSubview(&glass);
-
-        // Surbrillance de la sélection (placée derrière les cellules).
-        self.sel_frames = lay.cells.iter().map(|c| c.selection).collect();
-        let sel_fill = NSColor::controlAccentColor().colorWithAlphaComponent(0.30);
-        let sel = make_box(mtm, NSRect::ZERO, &sel_fill, 10.0);
-        match lay.cells.get(selected) {
-            Some(c) => sel.setFrame(to_nsrect(c.selection)),
-            None => sel.setHidden(true),
+        // Réutilise le verre persistant : on le redimensionne et on met son
+        // arrondi à l'échelle, sans le recréer (gain de latence à l'ouverture).
+        self.glass.setFrame(full);
+        if let Some(layer) = self.glass.layer() {
+            layer.setCornerRadius(18.0 * scale);
         }
-        content.addSubview(&sel);
-        self.selection = Some(sel);
+
+        // Surbrillance de la sélection (persistante, placée derrière les cellules).
+        self.sel_frames = lay.cells.iter().map(|c| c.selection).collect();
+        self.selection.setCornerRadius(10.0 * scale);
+        match lay.cells.get(selected) {
+            Some(c) => {
+                self.selection.setHidden(false);
+                self.selection.setFrame(to_nsrect(c.selection));
+            }
+            None => self.selection.setHidden(true),
+        }
+
+        // Reconstruit uniquement le conteneur des cellules.
+        self.cells.setFrame(full);
+        self.cells.setSubviews(&NSArray::new());
+        let content = self.cells.clone();
 
         // Cellules : aperçu (selon le mode) + titre.
         for (i, w) in windows.iter().enumerate() {
@@ -324,9 +360,9 @@ impl Overlay {
             });
             label.setTextColor(Some(&NSColor::labelColor()));
             let font_size = if matches!(mode, DisplayMode::Titles) {
-                14.0
+                14.0 * scale
             } else {
-                11.0
+                11.0 * scale
             };
             label.setFont(Some(&NSFont::systemFontOfSize(font_size)));
             label.setFrame(to_nsrect(cf.title));
@@ -339,14 +375,26 @@ impl Overlay {
 
     /// Déplace la surbrillance sur l'élément `selected` (overlay déjà visible).
     pub fn select(&mut self, selected: usize) {
-        if let (Some(sel), Some(frame)) = (self.selection.as_ref(), self.sel_frames.get(selected)) {
-            sel.setHidden(false);
-            sel.setFrame(to_nsrect(*frame));
+        if let Some(frame) = self.sel_frames.get(selected) {
+            self.selection.setHidden(false);
+            self.selection.setFrame(to_nsrect(*frame));
         }
     }
 
     /// Masque l'overlay.
     pub fn hide(&self) {
+        self.panel.orderOut(None);
+    }
+
+    /// « Préchauffe » le panneau : force, hors écran, la création de la surface
+    /// fenêtre et le premier rendu du verre dépoli, afin que la toute première
+    /// ouverture réelle soit instantanée (sinon le premier affichage accuse un
+    /// délai notable, le temps que le serveur de fenêtres alloue la surface).
+    pub fn prewarm(&self) {
+        self.glass
+            .setFrame(NSRect::new(NSPoint::ZERO, NSSize::new(200.0, 120.0)));
+        self.panel.setFrameOrigin(NSPoint::new(-10_000.0, -10_000.0));
+        self.panel.orderFrontRegardless();
         self.panel.orderOut(None);
     }
 }

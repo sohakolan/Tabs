@@ -53,6 +53,8 @@ struct TapState {
     mru: Vec<WindowId>,
     /// Mode d'affichage courant des cellules.
     mode: DisplayMode,
+    /// Facteur d'échelle de l'overlay (1.0 = taille de base, niveau 3).
+    scale: f64,
     /// Modificateur qui déclenche/maintient le cycle (Option par défaut, ou
     /// Command si le remplacement de Cmd-Tab est activé).
     trigger_flag: CGEventFlags,
@@ -77,6 +79,7 @@ thread_local! {
         windows: Vec::new(),
         mru: Vec::new(),
         mode: DisplayMode::Thumbnails,
+        scale: 1.0,
         trigger_flag: CGEventFlags::MaskAlternate,
         quit_with_q: false,
         close_with_w: true,
@@ -97,6 +100,8 @@ pub fn install(initial_mode: DisplayMode, on_open_prefs: Box<dyn Fn()>) -> bool 
     // confie les rappels souris, branchés sur la même machine à états.
     let mtm = MainThreadMarker::new().expect("install doit s'exécuter sur le thread principal");
     let overlay = Overlay::new(mtm, Box::new(mouse_hover), Box::new(mouse_click));
+    // Préchauffe la surface du panneau pour une première ouverture instantanée.
+    overlay.prewarm();
     STATE.with(|s| {
         let mut st = s.borrow_mut();
         st.overlay = Some(overlay);
@@ -361,7 +366,7 @@ fn refresh_after_removal(st: &mut TapState) {
     let active = st.switcher.is_active();
     if let Some(overlay) = st.overlay.as_mut() {
         if active && count > 0 {
-            overlay.show(&st.windows, selected, st.mode);
+            overlay.show(&st.windows, selected, st.mode, st.scale);
         } else {
             overlay.hide();
         }
@@ -388,6 +393,21 @@ pub fn set_close_with_w(enabled: bool) {
     STATE.with(|s| s.borrow_mut().close_with_w = enabled);
 }
 
+/// Définit l'échelle de l'overlay (niveau 1..=5) et le redessine s'il est ouvert.
+pub fn set_scale(level: u8) {
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.scale = crate::config::scale_factor(level);
+        if st.switcher.is_active() {
+            let selected = st.switcher.selected();
+            let st = &mut *st;
+            if let Some(overlay) = st.overlay.as_mut() {
+                overlay.show(&st.windows, selected, st.mode, st.scale);
+            }
+        }
+    });
+}
+
 fn modifier_flag(modifier: TriggerModifier) -> CGEventFlags {
     match modifier {
         TriggerModifier::Option => CGEventFlags::MaskAlternate,
@@ -412,7 +432,7 @@ pub fn set_mode(mode: DisplayMode) {
             let selected = st.switcher.selected();
             let st = &mut *st;
             if let Some(overlay) = st.overlay.as_mut() {
-                overlay.show(&st.windows, selected, mode);
+                overlay.show(&st.windows, selected, mode, st.scale);
             }
         }
     });
@@ -440,7 +460,7 @@ fn cycle_mode() {
         let selected = st.switcher.selected();
         let st = &mut *st;
         if let Some(overlay) = st.overlay.as_mut() {
-            overlay.show(&st.windows, selected, st.mode);
+            overlay.show(&st.windows, selected, st.mode, st.scale);
         }
     });
 }
@@ -457,7 +477,7 @@ fn perform(action: Action) {
             return;
         };
         match action {
-            Action::Show { selected } => overlay.show(&st.windows, selected, st.mode),
+            Action::Show { selected } => overlay.show(&st.windows, selected, st.mode, st.scale),
             Action::Select { selected } => overlay.select(selected),
             Action::Commit { selected } => {
                 overlay.hide();

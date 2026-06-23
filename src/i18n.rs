@@ -30,6 +30,10 @@ pub struct Strings {
     pub mode_appicons: &'static str,
     pub mode_titles: &'static str,
 
+    pub size: &'static str,
+    /// Libellés des 5 niveaux de taille (le niveau 3 est la taille de base).
+    pub size_levels: [&'static str; 5],
+
     pub trigger: &'static str,
     pub hold_key: &'static str,
     pub disable_cmd_tab: &'static str,
@@ -83,6 +87,15 @@ const FR: Strings = Strings {
     mode_appicons: "Icônes d'app",
     mode_titles: "Titres",
 
+    size: "Taille de l'overlay",
+    size_levels: [
+        "Très petite",
+        "Petite",
+        "Normale (défaut)",
+        "Grande",
+        "Très grande",
+    ],
+
     trigger: "Déclencheur",
     hold_key: "Touche maintenue (puis Tab) :",
     disable_cmd_tab: "Désactiver le Cmd-Tab du système",
@@ -128,6 +141,15 @@ const EN: Strings = Strings {
     mode_thumbnails: "Thumbnails",
     mode_appicons: "App icons",
     mode_titles: "Titles",
+
+    size: "Overlay size",
+    size_levels: [
+        "Smallest",
+        "Small",
+        "Default",
+        "Large",
+        "Largest",
+    ],
 
     trigger: "Trigger",
     hold_key: "Hold key (then Tab):",

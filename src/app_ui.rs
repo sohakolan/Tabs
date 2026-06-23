@@ -90,6 +90,19 @@ define_class!(
             self.select_mode(DisplayMode::Titles);
         }
 
+        #[unsafe(method(scaleChanged:))]
+        fn action_scale_changed(&self, sender: Option<&AnyObject>) {
+            // L'index 0..=4 du menu correspond aux niveaux 1..=5.
+            let idx = sender
+                .and_then(|s| s.downcast_ref::<NSPopUpButton>())
+                .map(|p| p.indexOfSelectedItem())
+                .unwrap_or(2);
+            let level = (idx as u8).saturating_add(1).clamp(1, 5);
+            self.ivars().settings.borrow_mut().scale = level;
+            self.save();
+            hotkey::set_scale(level);
+        }
+
         #[unsafe(method(languageChanged:))]
         fn action_language_changed(&self, sender: Option<&AnyObject>) {
             let idx = sender
@@ -335,7 +348,6 @@ impl AppController {
     /// Affiche la fenêtre de préférences (reconstruite à chaque ouverture pour
     /// refléter l'état courant : sélection, statuts de permissions).
     pub fn show_preferences(&self) {
-        NSApplication::sharedApplication(self.ivars().mtm).activate();
         self.present_preferences();
     }
 
@@ -370,7 +382,15 @@ impl AppController {
             old.orderOut(None);
         }
         let window = self.build_preferences_window(selected);
+        // Pour une application « accessoire » (sans Dock), il faut activer
+        // l'app en ignorant les autres AVANT d'ordonner la fenêtre au premier
+        // plan, sinon elle apparaît une fois sur deux derrière l'app active.
+        // `orderFrontRegardless` garantit l'affichage même sans activation.
+        let app = NSApplication::sharedApplication(self.ivars().mtm);
+        #[allow(deprecated)]
+        app.activateIgnoringOtherApps(true);
         window.makeKeyAndOrderFront(None);
+        window.orderFrontRegardless();
         *self.ivars().prefs_window.borrow_mut() = Some(window);
     }
 
@@ -496,6 +516,13 @@ impl AppController {
             self.add_tile(&pane, *mode, image, label_text, *action,
                 rect(x, ty, tile_w, 118.0), *mode == s.mode);
         }
+
+        // Taille de l'overlay : 5 niveaux, le niveau 3 est la taille de base.
+        let sy = ty - 44.0;
+        pane.addSubview(&section(mtm, t.size, rect(20.0, sy, PANE_W - 40.0, 18.0)));
+        let level = (s.scale.clamp(1, 5) as isize) - 1;
+        pane.addSubview(&popup(mtm, &t.size_levels, level,
+            sel!(scaleChanged:), self, rect(20.0, sy - 34.0, 200.0, 26.0)));
         pane
     }
 
