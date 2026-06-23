@@ -17,6 +17,17 @@ rm -rf "$APP"
 mkdir -p "$MACOS" "$RES"
 cp target/release/tabs "$MACOS/tabs"
 cp Info.plist "$APP/Contents/Info.plist"
+
+# Synchronise la version du bundle avec celle de Cargo.toml (source unique de
+# vérité) AVANT la signature, pour que l'app ne se déclare jamais à une ancienne
+# version dans son Info.plist (sinon « brew upgrade » semble ne rien faire).
+VERSION="$(grep -m1 -E '^version[[:space:]]*=' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+if [[ -n "$VERSION" ]]; then
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$APP/Contents/Info.plist"
+	echo "[bundle] version du bundle : $VERSION"
+fi
+
 cp assets/AppIcon.icns "$RES/AppIcon.icns"
 cp assets/preview_thumbnails.png assets/preview_appicons.png assets/preview_titles.png "$RES/"
 

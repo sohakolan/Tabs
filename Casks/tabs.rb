@@ -1,6 +1,6 @@
 cask "tabs" do
-  version "0.2.4"
-  sha256 "300c114ed91f716d81a9987d0b5482cbad274e766a20a4a8bafa836f1b9619b7"
+  version "0.2.5"
+  sha256 "a64566196ff2b7b29dee68d181f5c4284a9437e9b2b2ab4aaa3e6c47c160218f"
 
   url "https://github.com/sohakolan/Tabs/releases/download/v#{version}/Tabs-arm64.dmg"
   name "Tabs"
