@@ -57,6 +57,10 @@ struct TapState {
     /// maintient donc notre propre historique pour conserver un vrai ordre
     /// MRU par fenêtre (cf. [`windows::order_by_mru`]).
     mru: Vec<WindowId>,
+    /// Fenêtre validée au dernier `Commit`, consommée à la prochaine ouverture
+    /// pour la placer en tête même si l'instantané z de macOS est en retard
+    /// (cf. [`windows::order_by_mru`]).
+    committed: Option<WindowId>,
     /// Mode d'affichage courant des cellules.
     mode: DisplayMode,
     /// Facteur d'échelle de l'overlay (1.0 = taille de base, niveau 3).
@@ -82,6 +86,7 @@ thread_local! {
         switcher: Switcher::new(),
         windows: Vec::new(),
         mru: Vec::new(),
+        committed: None,
         mode: DisplayMode::Thumbnails,
         scale: 1.0,
         trigger_flag: CGEventFlags::MaskAlternate,
@@ -308,7 +313,10 @@ fn on_tab(shift: bool) {
         let mut st = s.borrow_mut();
         if !st.switcher.is_active() {
             let st = &mut *st;
-            let windows = windows::order_by_mru(windows::list_windows(), &mut st.mru);
+            // La fenêtre validée au dernier cycle prime sur l'instantané z s'il
+            // ne la reflète pas encore (cf. order_by_mru). Consommée ici.
+            let committed = st.committed.take();
+            let windows = windows::order_by_mru(windows::list_windows(), &mut st.mru, committed);
             st.switcher.set_count(windows.len());
             st.windows = windows;
         }
@@ -554,7 +562,12 @@ fn perform(action: Action) {
                 if let Some(overlay) = st.overlay.as_mut() {
                     overlay.hide();
                 }
-                st.windows.get(selected).cloned()
+                let window = st.windows.get(selected).cloned();
+                // Mémorise la fenêtre validée : à la prochaine ouverture elle
+                // sera placée en tête même si l'ordre z de macOS tarde à la
+                // remonter (cf. windows::order_by_mru).
+                st.committed = window.as_ref().map(|w| w.id);
+                window
             }
             Action::Cancel => {
                 if let Some(overlay) = st.overlay.as_mut() {

@@ -333,7 +333,7 @@ dependencies = [
 
 [[package]]
 name = "tabs"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "dispatch2",
  "objc2",
