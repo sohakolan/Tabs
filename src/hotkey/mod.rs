@@ -19,8 +19,9 @@ use crate::windows::{self, Window, WindowId};
 use core::ffi::c_void;
 use core::ptr::{self, NonNull};
 use std::cell::RefCell;
+use std::time::Duration;
 
-use dispatch2::DispatchQueue;
+use dispatch2::{DispatchQueue, DispatchTime};
 use objc2_app_kit::NSEvent;
 use objc2_core_foundation::{kCFRunLoopCommonModes, CFMachPort, CFRetained, CFRunLoop};
 use objc2_foundation::MainThreadMarker;
@@ -77,6 +78,11 @@ struct TapState {
     /// Autorise la touche « w » à fermer la fenêtre sélectionnée (activé par
     /// défaut).
     close_with_w: bool,
+    /// Pids des applications dont on a demandé la fermeture (touche « q ») et
+    /// qu'on garde affichées tant qu'elles ne sont pas réellement terminées.
+    pending_quits: Vec<i32>,
+    /// Un guetteur de terminaison est déjà programmé (évite d'en empiler).
+    quit_watch_scheduled: bool,
     /// Conservé pour pouvoir réactiver le tap s'il est désactivé par le système.
     port: Option<CFRetained<CFMachPort>>,
 }
@@ -92,6 +98,8 @@ thread_local! {
         trigger_flag: CGEventFlags::MaskAlternate,
         quit_with_q: false,
         close_with_w: true,
+        pending_quits: Vec::new(),
+        quit_watch_scheduled: false,
         overlay: None,
         port: None,
     });
@@ -383,8 +391,11 @@ fn deliver_thumbnail(generation: u64, id: WindowId, image: CFRetained<CGImage>) 
     });
 }
 
-/// Quitte l'application de la fenêtre sélectionnée (touche « q ») et met à jour
-/// l'overlay : les fenêtres de cette app sont retirées tout de suite.
+/// Demande la fermeture de l'application de la fenêtre sélectionnée (touche
+/// « q »). Contrairement à `w`, on ne retire **pas** l'app tout de suite : le
+/// `terminate` est asynchrone (dialogue « Enregistrer ? », quit lent…). L'app
+/// reste donc dans le sélecteur tant qu'elle vit — un « q » répété insiste — et
+/// un guetteur la retire dès sa terminaison réelle. Comme le vrai Cmd-Tab macOS.
 fn quit_selected_app() {
     STATE.with(|s| {
         let mut st = s.borrow_mut();
@@ -396,20 +407,72 @@ fn quit_selected_app() {
             return;
         };
 
-        // Finder : on ferme seulement la fenêtre sélectionnée (le quitter le
-        // tuerait et il se relancerait). Les autres apps quittent normalement.
-        let is_finder = windows::focus::bundle_id(pid).as_deref() == Some("com.apple.finder");
-        if is_finder {
+        // Finder ne se quitte pas (il se relancerait) : on ferme seulement la
+        // fenêtre sélectionnée, avec retrait optimiste immédiat.
+        if windows::focus::is_finder(pid) {
             windows::ax::close_window(pid, id);
-            // Retrait optimiste de cette seule fenêtre.
             st.windows.retain(|w| w.id != id);
-        } else {
-            windows::focus::quit_app(pid);
-            // Retrait optimiste des fenêtres de l'app fermée.
-            st.windows.retain(|w| w.pid != pid);
+            refresh_after_removal(&mut st);
+            return;
         }
-        refresh_after_removal(&mut st);
+
+        windows::focus::quit_app(pid);
+        if !st.pending_quits.contains(&pid) {
+            st.pending_quits.push(pid);
+        }
     });
+    schedule_quit_watch();
+}
+
+/// Délai entre deux vérifications de terminaison effective (touche « q »).
+const QUIT_POLL_MS: u64 = 250;
+
+/// Programme la prochaine vérification des apps en cours de fermeture, sauf s'il
+/// n'y a rien à guetter ou qu'un guetteur est déjà en attente.
+fn schedule_quit_watch() {
+    let arm = STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        if st.pending_quits.is_empty() || st.quit_watch_scheduled {
+            return false;
+        }
+        st.quit_watch_scheduled = true;
+        true
+    });
+    if !arm {
+        return;
+    }
+    if let Ok(when) = DispatchTime::try_from(Duration::from_millis(QUIT_POLL_MS)) {
+        DispatchQueue::main().after(when, poll_pending_quits).ok();
+    }
+}
+
+/// Retire du sélecteur les apps « q » réellement terminées ; se reprogramme tant
+/// qu'il en reste (et que le sélecteur est ouvert). Exécuté sur le thread
+/// principal via `DispatchQueue::after`.
+fn poll_pending_quits() {
+    STATE.with(|s| {
+        let mut st = s.borrow_mut();
+        st.quit_watch_scheduled = false;
+        // Sélecteur fermé : on abandonne le suivi, la prochaine ouverture relira
+        // l'état réel des fenêtres.
+        if !st.switcher.is_active() {
+            st.pending_quits.clear();
+            return;
+        }
+        let mut terminated: Vec<i32> = Vec::new();
+        st.pending_quits.retain(|&pid| {
+            let running = windows::focus::is_running(pid);
+            if !running {
+                terminated.push(pid);
+            }
+            running
+        });
+        if !terminated.is_empty() {
+            st.windows.retain(|w| !terminated.contains(&w.pid));
+            refresh_after_removal(&mut st);
+        }
+    });
+    schedule_quit_watch();
 }
 
 /// Ferme la seule fenêtre sélectionnée (touche « w ») sans quitter
@@ -421,12 +484,34 @@ fn close_selected_window() {
             return;
         }
         let selected = st.switcher.selected();
-        let Some((pid, id)) = st.windows.get(selected).map(|w| (w.pid, w.id)) else {
+        let Some((pid, id, app_name)) =
+            st.windows.get(selected).map(|w| (w.pid, w.id, w.app_name.clone()))
+        else {
             return;
         };
         windows::ax::close_window(pid, id);
         // Retrait optimiste de cette seule fenêtre.
         st.windows.retain(|w| w.id != id);
+        // Comportement Cmd-Tab : fermer une fenêtre ne quitte pas l'app. Si
+        // c'était sa dernière fenêtre, on la garde en entrée « sans fenêtre »
+        // (comme la phase 3 de `list_windows`) tant qu'elle tourne ; elle ne
+        // partira qu'au « q ». Finder est exclu (jamais listé sans fenêtre).
+        let app_gone = !st.windows.iter().any(|w| w.pid == pid);
+        if app_gone && !windows::focus::is_finder(pid) {
+            // Réinséré à la place qu'occupait la fenêtre pour garder la sélection
+            // sur l'app (et non la faire sauter en fin de liste).
+            let at = selected.min(st.windows.len());
+            st.windows.insert(
+                at,
+                windows::Window {
+                    id: windows::app_only_id(pid),
+                    pid,
+                    app_name,
+                    title: String::new(),
+                    minimized: false,
+                },
+            );
+        }
         refresh_after_removal(&mut st);
     });
 }

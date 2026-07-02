@@ -137,7 +137,7 @@ pub fn list_windows() -> Vec<Window> {
 /// Id de fenêtre synthétique pour une application sans fenêtre, dérivé du pid.
 /// Placé tout en haut de la plage `u32`, là où les vrais numéros de fenêtre
 /// CoreGraphics (séquentiels depuis de petites valeurs) n'arrivent jamais.
-fn app_only_id(pid: i32) -> WindowId {
+pub(crate) fn app_only_id(pid: i32) -> WindowId {
     0xF000_0000 | (pid as u32 & 0x0FFF_FFFF)
 }
 

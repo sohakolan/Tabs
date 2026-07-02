@@ -51,9 +51,12 @@ pub fn quit_app(pid: i32) {
     }
 }
 
-/// Identifiant de bundle (ex. `com.apple.finder`) de l'application `pid`.
-pub fn bundle_id(pid: i32) -> Option<String> {
-    Some(running_app(pid)?.bundleIdentifier()?.to_string())
+/// L'application `pid` est-elle toujours en cours d'exécution (non terminée) ?
+/// Sert au guetteur de la touche « q » : l'app ne quitte le sélecteur qu'une
+/// fois réellement fermée (le `terminate` est asynchrone : dialogue de
+/// confirmation, quit lent…).
+pub fn is_running(pid: i32) -> bool {
+    running_app(pid).is_some_and(|app| !app.isTerminated())
 }
 
 /// L'application `pid` est-elle Finder ? Évite une `String` intermédiaire et

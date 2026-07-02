@@ -49,10 +49,15 @@ pub enum Direction {
     Down,
 }
 
+/// Poids du décalage transverse : assez grand pour préférer l'alignement.
+const CROSS_WEIGHT: f64 = 3.0;
+
 /// Index de la cellule voisine de `from` dans la direction `dir`, ou `None` s'il
-/// n'y en a pas (bord de la grille). Purement géométrique sur les rectangles de
-/// cellule : fonctionne pour la grille horizontale comme pour la liste verticale,
-/// quel que soit l'ordre de remplissage, et borne aux bords (pas d'enroulement).
+/// n'y en a pas. Purement géométrique sur les rectangles de cellule : fonctionne
+/// pour la grille horizontale comme pour la liste verticale, quel que soit
+/// l'ordre de remplissage. Les flèches horizontales bornent aux bords ; les
+/// flèches verticales s'enroulent (flèche du haut ≈ Shift-Tab, flèche du bas
+/// ≈ Tab) : au bord haut/bas, on repart de l'autre extrémité de la colonne.
 ///
 /// On ne retient que les cellules réellement situées dans la direction demandée,
 /// puis on choisit la plus proche en pénalisant le décalage sur l'axe transverse
@@ -62,8 +67,6 @@ pub fn neighbor(rects: &[Rect], from: usize, dir: Direction) -> Option<usize> {
     let cx = cur.x + cur.w / 2.0;
     let cy = cur.y + cur.h / 2.0;
 
-    // Poids du décalage transverse : assez grand pour préférer l'alignement.
-    const CROSS_WEIGHT: f64 = 3.0;
     // Seuil minimal de progression dans la direction (anti-bruit).
     const EPS: f64 = 0.5;
 
@@ -90,6 +93,40 @@ pub fn neighbor(rects: &[Rect], from: usize, dir: Direction) -> Option<usize> {
             continue;
         }
         let score = primary + cross * CROSS_WEIGHT;
+        if score < best_score {
+            best_score = score;
+            best = Some(i);
+        }
+    }
+    // Au bord haut/bas, on enroule vers l'autre extrémité de la même colonne.
+    if best.is_none() && matches!(dir, Direction::Up | Direction::Down) {
+        best = wrap_vertical(rects, from, dir);
+    }
+    best
+}
+
+/// Cellule à l'extrémité opposée de la colonne de `from` : la plus basse pour la
+/// flèche du haut, la plus haute pour la flèche du bas. L'alignement de colonne
+/// (écart en x) prime, puis on prend la cellule la plus éloignée verticalement.
+fn wrap_vertical(rects: &[Rect], from: usize, dir: Direction) -> Option<usize> {
+    let cur = rects.get(from)?;
+    let cx = cur.x + cur.w / 2.0;
+
+    let mut best: Option<usize> = None;
+    let mut best_score = f64::INFINITY;
+    for (i, r) in rects.iter().enumerate() {
+        if i == from {
+            continue;
+        }
+        let rx = r.x + r.w / 2.0;
+        let ry = r.y + r.h / 2.0;
+        // Flèche du haut → extrémité basse (ry minimal) ; flèche du bas →
+        // extrémité haute (ry maximal, donc on minimise -ry).
+        let extreme = match dir {
+            Direction::Up => ry,
+            _ => -ry,
+        };
+        let score = (rx - cx).abs() * CROSS_WEIGHT + extreme;
         if score < best_score {
             best_score = score;
             best = Some(i);
@@ -448,11 +485,12 @@ mod tests {
         assert_eq!(neighbor(&r, 1, Direction::Left), Some(0));
         assert_eq!(neighbor(&r, 0, Direction::Down), Some(3));
         assert_eq!(neighbor(&r, 4, Direction::Up), Some(1));
-        // Bords : pas d'enroulement.
+        // Bords horizontaux : pas d'enroulement.
         assert_eq!(neighbor(&r, 0, Direction::Left), None);
-        assert_eq!(neighbor(&r, 0, Direction::Up), None);
         assert_eq!(neighbor(&r, 2, Direction::Right), None);
-        assert_eq!(neighbor(&r, 5, Direction::Down), None);
+        // Bords verticaux : enroulement vers l'autre extrémité de la colonne.
+        assert_eq!(neighbor(&r, 0, Direction::Up), Some(3));
+        assert_eq!(neighbor(&r, 5, Direction::Down), Some(2));
     }
 
     #[test]
@@ -462,8 +500,9 @@ mod tests {
         let r = sel_rects(&l);
         assert_eq!(neighbor(&r, 0, Direction::Down), Some(1));
         assert_eq!(neighbor(&r, 2, Direction::Up), Some(1));
-        assert_eq!(neighbor(&r, 0, Direction::Up), None);
-        assert_eq!(neighbor(&r, 3, Direction::Down), None);
+        // Enroulement vertical (flèche du haut ≈ Shift-Tab, flèche du bas ≈ Tab).
+        assert_eq!(neighbor(&r, 0, Direction::Up), Some(3));
+        assert_eq!(neighbor(&r, 3, Direction::Down), Some(0));
         assert_eq!(neighbor(&r, 0, Direction::Right), None);
     }
 
